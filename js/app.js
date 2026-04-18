@@ -1540,6 +1540,11 @@ class FbaAnalyzer {
         const card = document.getElementById('np-histogram-card');
         if (!card) return;
         if (!hasData) {
+            // Si no hay data, limpiamos chart previo y escondemos card
+            if (this.chartNpDays) {
+                try { this.chartNpDays.destroy(); } catch (e) {}
+                this.chartNpDays = null;
+            }
             card.style.display = 'none';
             return;
         }
@@ -1564,6 +1569,7 @@ class FbaAnalyzer {
             return d >= b.min && d <= b.max;
         }).length);
 
+        // Update in-place si ya existe
         if (this.chartNpDays) {
             this.chartNpDays.data.datasets[0].data = counts;
             this.chartNpDays._buckets = buckets;
@@ -1571,60 +1577,69 @@ class FbaAnalyzer {
             return;
         }
 
-        const ctx = document.getElementById('chart-np-days');
-        if (!ctx) return;
-        const gridC = isDark ? 'rgba(48,54,61,0.3)' : 'rgba(0,0,0,0.06)';
+        // Creación inicial: el card recién pasó de display:none a visible.
+        // Chart.js necesita que el browser haya hecho layout para medir bien el canvas.
+        // Doble requestAnimationFrame = espera 2 frames = layout garantizado.
+        const createChart = () => {
+            const ctx = document.getElementById('chart-np-days');
+            if (!ctx) return;
+            const gridC = isDark ? 'rgba(48,54,61,0.3)' : 'rgba(0,0,0,0.06)';
 
-        this.chartNpDays = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: buckets.map(b => b.label + ' d'),
-                datasets: [{
-                    data: counts,
-                    backgroundColor: (c) => this.makeGradient(c, buckets[c.dataIndex]?.color || '#888', 0.85, 0.2),
-                    hoverBackgroundColor: (c) => buckets[c.dataIndex]?.color || '#888',
-                    borderRadius: 6, barPercentage: 0.85, borderWidth: 0,
-                }]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false,
-                layout: { padding: { top: 18 } },
-                onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
-                onClick: (evt, elements) => {
-                    if (!elements.length) return;
-                    const idx = elements[0].index;
-                    const bucket = this.chartNpDays._buckets?.[idx] || buckets[idx];
-                    const mdInput = document.getElementById('np-filter-mindays');
-                    if (mdInput) {
-                        mdInput.value = bucket.min;
-                        this.renderNotPrime();
-                    }
+            this.chartNpDays = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: buckets.map(b => b.label + ' d'),
+                    datasets: [{
+                        data: counts,
+                        backgroundColor: (c) => this.makeGradient(c, buckets[c.dataIndex]?.color || '#888', 0.85, 0.2),
+                        hoverBackgroundColor: (c) => buckets[c.dataIndex]?.color || '#888',
+                        borderRadius: 6, barPercentage: 0.85, borderWidth: 0,
+                    }]
                 },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        padding: 12,
-                        callbacks: {
-                            title: (ctx) => `${ctx[0].label}`,
-                            label: (c) => ` ${c.parsed.y} SKU${c.parsed.y === 1 ? '' : 's'}`,
-                            afterBody: () => ['  ↳ click to filter by min days']
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    layout: { padding: { top: 18 } },
+                    onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+                    onClick: (evt, elements) => {
+                        if (!elements.length) return;
+                        const idx = elements[0].index;
+                        const bucket = this.chartNpDays._buckets?.[idx] || buckets[idx];
+                        const mdInput = document.getElementById('np-filter-mindays');
+                        if (mdInput) {
+                            mdInput.value = bucket.min;
+                            this.renderNotPrime();
                         }
                     },
-                    datalabels: {
-                        display: (ctx) => ctx.dataset.data[ctx.dataIndex] > 0,
-                        anchor: 'end', align: 'end', offset: 2,
-                        color: isDark ? '#c9d1d9' : '#1f2328',
-                        font: { weight: '700', size: 11, family: "'DM Sans', sans-serif" },
-                        formatter: (v) => v,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            padding: 12,
+                            callbacks: {
+                                title: (ctx) => `${ctx[0].label}`,
+                                label: (c) => ` ${c.parsed.y} SKU${c.parsed.y === 1 ? '' : 's'}`,
+                                afterBody: () => ['  ↳ click to filter by min days']
+                            }
+                        },
+                        datalabels: {
+                            display: (ctx) => ctx.dataset.data[ctx.dataIndex] > 0,
+                            anchor: 'end', align: 'end', offset: 2,
+                            color: isDark ? '#c9d1d9' : '#1f2328',
+                            font: { weight: '700', size: 11, family: "'DM Sans', sans-serif" },
+                            formatter: (v) => v,
+                        }
+                    },
+                    scales: {
+                        x: { grid: { display: false, drawBorder: false }, ticks: { font: { size: 10 } } },
+                        y: { beginAtZero: true, grid: { color: gridC, drawBorder: false }, ticks: { precision: 0 } }
                     }
-                },
-                scales: {
-                    x: { grid: { display: false, drawBorder: false }, ticks: { font: { size: 10 } } },
-                    y: { beginAtZero: true, grid: { color: gridC, drawBorder: false }, ticks: { precision: 0 } }
                 }
-            }
-        });
-        this.chartNpDays._buckets = buckets;
+            });
+            this.chartNpDays._buckets = buckets;
+        };
+
+        // Doble rAF para garantizar que el browser hizo layout del card
+        // después de hacerlo visible. Sin esto, Chart.js mide el canvas a 0x0.
+        requestAnimationFrame(() => requestAnimationFrame(createChart));
     }
 
     downloadRawJSON() {
