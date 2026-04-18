@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stylish · Amazon FBA Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/config.js"></script>
+
+    <link rel="stylesheet" href="css/style.css?v=3.4">
+</head>
+<body>
+
+<!-- Top Bar -->
+<nav class="top-bar">
+    <div class="d-flex align-items-center gap-3">
+        <div class="brand">
+            <i class="fas fa-cubes"></i>
+            <span>FBA Analyzer</span>
+        </div>
+        <span class="version-badge">v3.0 · static</span>
+    </div>
+    <div class="d-flex align-items-center gap-3">
+        <div class="marketplace-toggle">
+            <span class="mp-label" id="mp-label-ca">
+                <img src="https://flagcdn.com/w20/ca.png" alt="CA" width="16"> CA
+            </span>
+            <label class="switch">
+                <input type="checkbox" id="amazon-marketplace-switch">
+                <span class="slider"></span>
+            </label>
+            <span class="mp-label" id="mp-label-us">
+                <img src="https://flagcdn.com/w20/us.png" alt="US" width="16"> USA
+            </span>
+        </div>
+        <button class="theme-toggle" id="theme-toggle" title="Toggle light/dark">
+            <i class="fas fa-sun" id="theme-icon"></i>
+        </button>
+    </div>
+</nav>
+
+<div id="config-status-bar" class="config-status-bar" style="display:none;">
+    <span id="config-status-text"></span>
+</div>
+
+<!-- Upload Section -->
+<section class="upload-section">
+    <div class="container-fluid px-4">
+        <div class="section-header">
+            <h2><i class="fas fa-cloud-arrow-up me-2"></i>Upload reports</h2>
+            <p class="text-secondary">Drop your three source files to begin analysis</p>
+        </div>
+        <div class="row g-3">
+            <div class="col-md-4">
+                <div class="upload-card" id="amazon-upload">
+                    <div class="upload-icon amazon"><i class="fas fa-boxes-stacked"></i></div>
+                    <h6 id="amazon-report-title">Amazon Restock Report</h6>
+                    <small class="upload-hint">XLSX / CSV</small>
+                    <div class="upload-status" id="amazon-status"></div>
+                    <input type="file" class="d-none" accept=".xlsx,.xls,.csv" id="amazon-file">
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="upload-card" id="cin7-upload">
+                    <div class="upload-icon cin7"><i class="fas fa-database"></i></div>
+                    <h6>CIN7 Inventory</h6>
+                    <small class="upload-hint">CSV</small>
+                    <div class="upload-status" id="cin7-status"></div>
+                    <input type="file" class="d-none" accept=".xlsx,.xls,.csv" id="cin7-file">
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="upload-card" id="stylish-upload">
+                    <div class="upload-icon stylish"><i class="fas fa-chart-line"></i></div>
+                    <h6>Stylish Inventory</h6>
+                    <small class="upload-hint">XLSX</small>
+                    <div class="upload-status" id="stylish-status"></div>
+                    <input type="file" class="d-none" accept=".xlsx,.xls,.csv" id="stylish-file">
+                </div>
+            </div>
+        </div>
+        <div class="text-center mt-4">
+            <button id="process-btn" class="btn-process" disabled>
+                <i class="fas fa-bolt me-2"></i>Run Analysis
+            </button>
+        </div>
+    </div>
+</section>
+
+<!-- KPI Dashboard -->
+<section class="kpi-section" id="kpi-section" style="display:none;">
+    <div class="container-fluid px-4">
+        <div class="section-header">
+            <h2><i class="fas fa-gauge-high me-2"></i>Dashboard</h2>
+            <div class="d-flex align-items-center gap-2">
+                <span class="text-secondary me-2">Inventory target:</span>
+                <div class="days-selector">
+                    <button class="day-btn active" data-days="45">45d</button>
+                    <button class="day-btn" data-days="60">60d</button>
+                    <button class="day-btn" data-days="90">90d</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-lg-3">
+                <div class="kpi-card kpi-total" id="card-total">
+                    <div class="kpi-icon"><i class="fas fa-boxes-stacked"></i></div>
+                    <div class="kpi-body">
+                        <span class="kpi-value" id="kpi-total-skus">0</span>
+                        <span class="kpi-label">Total SKUs</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="kpi-card kpi-danger clickable" id="card-oos" data-filter="oos">
+                    <div class="kpi-icon"><i class="fas fa-triangle-exclamation"></i></div>
+                    <div class="kpi-body">
+                        <span class="kpi-value" id="kpi-oos">0</span>
+                        <span class="kpi-label">Out of stock</span>
+                    </div>
+                    <span class="kpi-badge">Amazon = 0</span>
+                </div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="kpi-card kpi-warning clickable" id="card-low" data-filter="low">
+                    <div class="kpi-icon"><i class="fas fa-battery-quarter"></i></div>
+                    <div class="kpi-body">
+                        <span class="kpi-value" id="kpi-low">0</span>
+                        <span class="kpi-label">Critical stock</span>
+                    </div>
+                    <span class="kpi-badge">&lt; 30 days</span>
+                </div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="kpi-card kpi-success clickable" id="card-healthy" data-filter="healthy">
+                    <div class="kpi-icon"><i class="fas fa-shield-check"></i></div>
+                    <div class="kpi-body">
+                        <span class="kpi-value" id="kpi-healthy">0</span>
+                        <span class="kpi-label">Healthy stock</span>
+                    </div>
+                    <span class="kpi-badge">≥ 30 days</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-lg-3">
+                <div class="kpi-card kpi-info clickable" id="card-tosend" data-filter="tosend">
+                    <div class="kpi-icon"><i class="fas fa-truck-fast"></i></div>
+                    <div class="kpi-body">
+                        <span class="kpi-value" id="kpi-tosend">0</span>
+                        <span class="kpi-label">Units to send</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="kpi-card kpi-inbound clickable" id="card-inbound" data-filter="inbound">
+                    <div class="kpi-icon"><i class="fas fa-parachute-box"></i></div>
+                    <div class="kpi-body">
+                        <span class="kpi-value" id="kpi-inbound">0</span>
+                        <span class="kpi-label">Inbound / transit</span>
+                    </div>
+                    <span class="kpi-badge">ETA active</span>
+                </div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="kpi-card kpi-warehouse clickable" id="card-nowarehouse" data-filter="nowarehouse">
+                    <div class="kpi-icon"><i class="fas fa-box-open"></i></div>
+                    <div class="kpi-body">
+                        <span class="kpi-value" id="kpi-nowarehouse">0</span>
+                        <span class="kpi-label">No warehouse stock</span>
+                    </div>
+                    <span class="kpi-badge">Stylish = 0</span>
+                </div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="kpi-card kpi-overstock clickable" id="card-overstock" data-filter="overstock">
+                    <div class="kpi-icon"><i class="fas fa-arrow-up-right-dots"></i></div>
+                    <div class="kpi-body">
+                        <span class="kpi-value" id="kpi-overstock">0</span>
+                        <span class="kpi-label">Overstocked</span>
+                    </div>
+                    <span class="kpi-badge">&gt; 120 days</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-lg-3">
+                <div class="kpi-card kpi-fba clickable" id="card-infba" data-filter="infba">
+                    <div class="kpi-icon"><i class="fas fa-warehouse"></i></div>
+                    <div class="kpi-body">
+                        <span class="kpi-value" id="kpi-infba">0</span>
+                        <span class="kpi-label">Products in FBA</span>
+                    </div>
+                    <span class="kpi-badge">Total units &gt; 0</span>
+                </div>
+            </div>
+            <div class="col-6 col-lg-3">
+                <div class="kpi-card kpi-prime clickable" id="card-inprime" data-filter="inprime">
+                    <div class="kpi-icon"><i class="fas fa-crown"></i></div>
+                    <div class="kpi-body">
+                        <span class="kpi-value" id="kpi-inprime">0</span>
+                        <span class="kpi-label">Products in Prime</span>
+                    </div>
+                    <span class="kpi-badge">Available &gt; 0</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-3 mb-3">
+            <div class="col-lg-4">
+                <div class="chart-card">
+                    <h6 class="chart-title">Inventory health</h6>
+                    <div class="chart-wrap"><canvas id="chart-health"></canvas></div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="chart-card">
+                    <h6 class="chart-title">Top 10 — units sold (30d)</h6>
+                    <div class="chart-wrap"><canvas id="chart-top-sellers"></canvas></div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="chart-card">
+                    <h6 class="chart-title">Stock by category</h6>
+                    <div class="chart-wrap"><canvas id="chart-categories"></canvas></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-3 mb-4">
+            <div class="col-lg-12">
+                <div class="chart-card">
+                    <h6 class="chart-title">Coverage distribution · días de inventario por rango</h6>
+                    <div class="chart-wrap"><canvas id="chart-coverage-dist"></canvas></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Filters + Table -->
+<section class="table-section" id="table-section" style="display:none;">
+    <div class="container-fluid px-4">
+        <div class="row g-3">
+
+            <!-- LEFT: Detail View (main table, filters) -->
+            <div class="col-xl-8 col-lg-12">
+                <div class="section-header">
+                    <h2><i class="fas fa-table-columns me-2"></i>Detail view</h2>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge-count" id="filter-count">0 items</span>
+                        <button id="export-btn" class="btn-export" disabled>
+                            <i class="fas fa-file-arrow-down me-1"></i>Export CSV
+                        </button>
+                    </div>
+                </div>
+
+                <div class="filter-bar">
+                    <div class="filter-group">
+                        <label>FBA</label>
+                        <select class="filter-select" id="filter-fba">
+                            <option value="">All</option>
+                            <option value="YES">YES</option>
+                            <option value="Pending">Pending</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>SKU</label>
+                        <input type="text" class="filter-input" id="filter-sku" placeholder="Search...">
+                    </div>
+                    <div class="filter-group">
+                        <label>Category</label>
+                        <select class="filter-select" id="filter-category">
+                            <option value="">All categories</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Send method</label>
+                        <select class="filter-select" id="filter-send-method">
+                            <option value="">All methods</option>
+                            <option value="Pallet">Pallet</option>
+                            <option value="Carton">Carton</option>
+                            <option value="Loose">Loose</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>&nbsp;</label>
+                        <label class="filter-checkbox">
+                            <input type="checkbox" id="filter-qty-to-send">
+                            <span>Only Qty &gt; 0</span>
+                        </label>
+                    </div>
+                    <div class="filter-group">
+                        <label>&nbsp;</label>
+                        <button id="clear-filters" class="btn-clear"><i class="fas fa-xmark me-1"></i>Clear</button>
+                    </div>
+                </div>
+
+                <div class="table-scroll-wrapper">
+                    <table class="data-table" id="results-table">
+                        <thead>
+                            <tr>
+                                <th>SKU</th>
+                                <th>FBA</th>
+                                <th>Category</th>
+                                <th class="text-end">Sold 30d</th>
+                                <th class="text-end" id="th-target">Target 45d</th>
+                                <th class="text-end">Amazon inv.</th>
+                                <th class="text-end">Coverage</th>
+                                <th class="text-end">Pack density</th>
+                                <th class="text-end" id="th-warehouse">Warehouse (CIN7)</th>
+                                <th class="text-end">Stylish inv.</th>
+                                <th class="text-end">Qty to send</th>
+                                <th>Method</th>
+                                <th class="text-end">Pallets</th>
+                                <th>Inbound</th>
+                            </tr>
+                        </thead>
+                        <tbody id="results-body">
+                            <tr>
+                                <td colspan="14" class="empty-state">
+                                    <i class="fas fa-cloud-arrow-up"></i>
+                                    <span>Upload files and run analysis to see results</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- RIGHT: Not in Prime list (FBA > 0 && Available === 0) -->
+            <div class="col-xl-4 col-lg-12">
+                <div class="section-header">
+                    <h2>
+                        <i class="fas fa-triangle-exclamation me-2" style="color:var(--warning);"></i>
+                        FBA · Not Prime
+                    </h2>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge-count" id="np-count">0 items</span>
+                        <button id="np-export-btn" class="btn-export" disabled>
+                            <i class="fas fa-file-arrow-down me-1"></i>CSV
+                        </button>
+                    </div>
+                </div>
+
+                <div class="filter-bar filter-bar-compact">
+                    <div class="filter-group" style="flex:1; min-width:0;">
+                        <label>Search</label>
+                        <input type="text" class="filter-input" id="np-filter-sku" placeholder="SKU or category...">
+                    </div>
+                    <div class="filter-group" style="flex:0 0 100px;">
+                        <label>Min days</label>
+                        <input type="number" class="filter-input" id="np-filter-mindays" min="0" max="999" value="0" title="Minimum days unavailable for Prime">
+                    </div>
+                    <div class="filter-group">
+                        <label>&nbsp;</label>
+                        <button id="np-clear-filters" class="btn-clear" title="Clear"><i class="fas fa-xmark"></i></button>
+                    </div>
+                </div>
+
+                <div class="np-hint">
+                    <i class="fas fa-circle-info me-1"></i>
+                    Productos con stock total en FBA pero 0 disponible para Prime
+                    <span id="np-sync-status" class="np-sync-status"></span>
+                </div>
+
+                <div class="table-scroll-wrapper">
+                    <table class="data-table compact-table" id="np-table">
+                        <thead>
+                            <tr>
+                                <th>SKU</th>
+                                <th>Category</th>
+                                <th class="text-end">FBA</th>
+                                <th class="text-end" title="Days unavailable for Prime">Days</th>
+                            </tr>
+                        </thead>
+                        <tbody id="np-body">
+                            <tr>
+                                <td colspan="4" class="empty-state">
+                                    <span>—</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Histogram de distribución de días -->
+                <div class="chart-card np-histogram" id="np-histogram-card" style="display:none;">
+                    <h6 class="chart-title">Unavailable days · distribution</h6>
+                    <div class="chart-wrap chart-wrap-sm"><canvas id="chart-np-days"></canvas></div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="text-center mt-3 mb-4">
+            <a href="#" id="toggle-debug" class="text-secondary small" style="text-decoration:none;">
+                <i class="fas fa-terminal me-1"></i>Show processing details
+            </a>
+        </div>
+    </div>
+</section>
+
+<!-- Debug section (hidden by default) -->
+<section class="debug-section" id="debug-section" style="display:none;">
+    <div class="container-fluid px-4">
+        <div class="section-header">
+            <h2><i class="fas fa-terminal me-2"></i>Processing details</h2>
+            <button id="download-json" class="btn-clear">
+                <i class="fas fa-file-arrow-down me-1"></i>Download raw JSON
+            </button>
+        </div>
+        <div class="debug-card">
+            <pre id="debug-output"></pre>
+        </div>
+    </div>
+</section>
+
+<div class="modal fade" id="loadingModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content loading-modal">
+            <div class="modal-body text-center py-4">
+                <div class="loader mb-3"></div>
+                <h6>Processing...</h6>
+                <p class="text-secondary small mb-0">Running in your browser</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="js/app.js?v=3.4" defer></script>
+</body>
+</html>

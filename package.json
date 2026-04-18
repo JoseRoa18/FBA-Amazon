@@ -1,0 +1,9 @@
+{
+  "name": "fba-analyzer",
+  "version": "3.4.0",
+  "private": true,
+  "description": "FBA Analyzer - static inventory analysis app for Amazon sellers",
+  "scripts": {
+    "build": "node build.js"
+  }
+}
