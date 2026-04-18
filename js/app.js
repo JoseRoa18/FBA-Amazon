@@ -840,29 +840,13 @@ class FbaAnalyzer {
 
     // Forzar recrear charts (ej. al cambiar tema claro/oscuro).
     destroyAllCharts() {
-        // Mapa chart instance → canvas id. Incluye el histograma de Not Prime
-        // también porque sus colores están cacheados y cambian con el theme.
-        const charts = {
-            chartHealth:        'chart-health',
-            chartTopSellers:    'chart-top-sellers',
-            chartCategories:    'chart-categories',
-            chartCoverageDist:  'chart-coverage-dist',
-            chartNpDays:        'chart-np-days',
-        };
-        Object.entries(charts).forEach(([name, canvasId]) => {
+        // Chart.js se encarga del cleanup del canvas en destroy().
+        // No manipulamos width/height manualmente porque interfiere con la
+        // re-medición de dimensiones al crear el chart nuevo.
+        ['chartHealth', 'chartTopSellers', 'chartCategories', 'chartCoverageDist', 'chartNpDays'].forEach(name => {
             if (this[name]) {
                 try { this[name].destroy(); } catch (e) { /* ignore */ }
                 this[name] = null;
-            }
-            // Resetear dimensiones del canvas. Chart.js deja width/height inline
-            // después de destroy y el siguiente new Chart() los hereda en vez de
-            // re-medir el contenedor, resultando en un chart de tamaño cero.
-            const ctx = document.getElementById(canvasId);
-            if (ctx) {
-                ctx.removeAttribute('width');
-                ctx.removeAttribute('height');
-                ctx.style.width = '';
-                ctx.style.height = '';
             }
         });
     }
@@ -1751,6 +1735,7 @@ class FbaAnalyzer {
         localStorage.setItem('fba-theme', next);
     }
     applyTheme(theme) {
+        console.log(`[FBA Theme] → ${theme}`);
         document.documentElement.setAttribute('data-theme', theme);
         const icon = document.getElementById('theme-icon');
         if (icon) icon.className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
@@ -1759,21 +1744,27 @@ class FbaAnalyzer {
         Chart.defaults.color = textColor;
         Chart.defaults.borderColor = gridColor;
 
-        // Los colores de cada chart están cacheados al momento de creación → hay que
-        // destruir y recrear. destroyAllCharts limpia los atributos width/height del
-        // canvas para que Chart.js vuelva a medir el contenedor al crear los nuevos.
         if (this.allData?.length > 0) {
+            // Los colores de cada chart están cacheados al crearse → destruir + recrear
             this.destroyAllCharts();
+            console.log('[FBA Theme] charts destroyed, scheduling re-render');
 
-            // Doble rAF para dar un tick al browser para que el style-recalc del
-            // theme se propague (CSS vars, colores de bg, etc.) antes de que los
-            // nuevos charts midan el canvas.
-            requestAnimationFrame(() => requestAnimationFrame(() => {
+            // UN rAF para dar al browser un tick de CSS recalc. updateDashboard
+            // y renderNotPrime tienen sus propios rAF internos para el chart create.
+            requestAnimationFrame(() => {
                 this.updateDashboard();
-                // También re-renderizar la sección Not Prime para recrear el
-                // histograma con los colores del nuevo tema.
                 this.renderNotPrime();
-            }));
+                // Verificar en consola que los refs se recrearon
+                setTimeout(() => {
+                    console.log('[FBA Theme] chart refs after recreate:', {
+                        health: !!this.chartHealth,
+                        topSellers: !!this.chartTopSellers,
+                        categories: !!this.chartCategories,
+                        coverage: !!this.chartCoverageDist,
+                        npDays: !!this.chartNpDays,
+                    });
+                }, 200);
+            });
         }
     }
 
