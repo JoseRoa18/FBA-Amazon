@@ -840,10 +840,29 @@ class FbaAnalyzer {
 
     // Forzar recrear charts (ej. al cambiar tema claro/oscuro).
     destroyAllCharts() {
-        ['chartHealth', 'chartTopSellers', 'chartCategories', 'chartCoverageDist'].forEach(name => {
+        // Mapa chart instance → canvas id. Incluye el histograma de Not Prime
+        // también porque sus colores están cacheados y cambian con el theme.
+        const charts = {
+            chartHealth:        'chart-health',
+            chartTopSellers:    'chart-top-sellers',
+            chartCategories:    'chart-categories',
+            chartCoverageDist:  'chart-coverage-dist',
+            chartNpDays:        'chart-np-days',
+        };
+        Object.entries(charts).forEach(([name, canvasId]) => {
             if (this[name]) {
-                try { this[name].destroy(); } catch (e) {}
+                try { this[name].destroy(); } catch (e) { /* ignore */ }
                 this[name] = null;
+            }
+            // Resetear dimensiones del canvas. Chart.js deja width/height inline
+            // después de destroy y el siguiente new Chart() los hereda en vez de
+            // re-medir el contenedor, resultando en un chart de tamaño cero.
+            const ctx = document.getElementById(canvasId);
+            if (ctx) {
+                ctx.removeAttribute('width');
+                ctx.removeAttribute('height');
+                ctx.style.width = '';
+                ctx.style.height = '';
             }
         });
     }
@@ -1740,12 +1759,21 @@ class FbaAnalyzer {
         Chart.defaults.color = textColor;
         Chart.defaults.borderColor = gridColor;
 
-        // Al cambiar tema, los colores están cacheados en cada chart → hay que recrearlos.
-        // Con la estrategia update-in-place los charts no se destruyen al re-renderizar,
-        // por lo que necesitamos destruirlos explícitamente solo en este caso.
+        // Los colores de cada chart están cacheados al momento de creación → hay que
+        // destruir y recrear. destroyAllCharts limpia los atributos width/height del
+        // canvas para que Chart.js vuelva a medir el contenedor al crear los nuevos.
         if (this.allData?.length > 0) {
             this.destroyAllCharts();
-            this.updateDashboard();
+
+            // Doble rAF para dar un tick al browser para que el style-recalc del
+            // theme se propague (CSS vars, colores de bg, etc.) antes de que los
+            // nuevos charts midan el canvas.
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                this.updateDashboard();
+                // También re-renderizar la sección Not Prime para recrear el
+                // histograma con los colores del nuevo tema.
+                this.renderNotPrime();
+            }));
         }
     }
 
