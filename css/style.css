@@ -431,3 +431,54 @@ section { padding: 28px 0; }
 /* Histogram card below Not Prime table */
 .np-histogram { margin-top: 14px; }
 .chart-wrap-sm { height: 180px; position: relative; }
+
+/* ============================================================
+   Dark mode contrast improvements (v3.4.1)
+   Varios elementos usaban --text-secondary que en fondo oscuro
+   tiene contraste marginal para texto pequeño / uppercase.
+   ============================================================ */
+
+[data-theme="dark"] .chart-title {
+    color: #c9d1d9;           /* más brillante que el secondary #8b949e */
+    font-weight: 700;
+    letter-spacing: 0.06em;
+}
+
+[data-theme="dark"] .section-header h2 {
+    color: #e6edf3;
+}
+
+[data-theme="dark"] .filter-group label {
+    color: #adbac7;
+}
+
+[data-theme="dark"] .cat-truncate {
+    color: #adbac7;            /* antes text-secondary era muy tenue para cat names */
+}
+
+[data-theme="dark"] .np-hint {
+    color: #c9d1d9;
+}
+
+/* El opacity:0.7 original hacía al sync-status demasiado tenue */
+.np-sync-status { opacity: 1 !important; }
+[data-theme="dark"] .np-sync-status.sync-ok { color: #56d364; }
+[data-theme="dark"] .np-sync-status.sync-err { color: #ff7b72; }
+[data-theme="dark"] .np-sync-status.sync-off { color: #8b949e; }
+
+/* Axis labels (ticks) de charts en dark mode estaban muy oscuros */
+[data-theme="dark"] canvas { opacity: 1; }
+
+/* Empty state icons/text visible en dark */
+[data-theme="dark"] .empty-state {
+    color: #8b949e;
+}
+[data-theme="dark"] .empty-state i {
+    color: #6e7681;
+}
+
+/* KPI badges de texto pequeño en dark */
+[data-theme="dark"] .kpi-badge {
+    color: inherit;
+    opacity: 0.95;
+}
