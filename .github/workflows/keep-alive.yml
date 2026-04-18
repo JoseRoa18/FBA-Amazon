@@ -1,0 +1,40 @@
+name: Supabase Keep-Alive
+
+# Propósito: Supabase pausa proyectos del free tier después de 7 días
+# sin actividad. Este workflow hace una query mínima cada día para
+# mantener el proyecto activo y los datos accesibles 24/7.
+
+on:
+  schedule:
+    # Corre todos los días a las 08:00 UTC (04:00 Miami EST).
+    # Cron docs: https://crontab.guru/
+    - cron: '0 8 * * *'
+  # También permite triggerearlo manualmente desde la pestaña Actions de GitHub
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::error::Missing SUPABASE_URL or SUPABASE_ANON_KEY secrets"
+            exit 1
+          fi
+          echo "Pinging Supabase at $SUPABASE_URL..."
+          RESPONSE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/not_prime_tracking?select=marketplace&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+          if [ "$RESPONSE" = "200" ]; then
+            echo "✓ Supabase responded with 200 OK. Project is alive."
+            cat /tmp/response.txt
+          else
+            echo "::error::Supabase returned HTTP $RESPONSE"
+            cat /tmp/response.txt
+            exit 1
+          fi
