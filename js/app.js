@@ -38,7 +38,7 @@ class FbaAnalyzer {
         Chart.defaults.borderColor = 'rgba(48,54,61,0.5)';
         Chart.defaults.font.family = "'DM Sans', sans-serif";
         Chart.defaults.font.size = 12;
-        Chart.defaults.animation = { duration: 650, easing: 'easeOutQuart' };
+        Chart.defaults.animation = { duration: 300, easing: 'easeOutQuart' };
         Chart.defaults.plugins.tooltip = {
             ...Chart.defaults.plugins.tooltip,
             backgroundColor: 'rgba(13, 17, 23, 0.95)',
@@ -840,12 +840,15 @@ class FbaAnalyzer {
 
     // Forzar recrear charts (ej. al cambiar tema claro/oscuro).
     destroyAllCharts() {
-        // Chart.js se encarga del cleanup del canvas en destroy().
-        // No manipulamos width/height manualmente porque interfiere con la
-        // re-medición de dimensiones al crear el chart nuevo.
+        // Chart.js puede tirar "this._fn is not a function" si se destruye
+        // un chart mientras tiene animaciones pendientes. stop() cancela
+        // la cola de animaciones antes de destroy.
         ['chartHealth', 'chartTopSellers', 'chartCategories', 'chartCoverageDist', 'chartNpDays'].forEach(name => {
             if (this[name]) {
-                try { this[name].destroy(); } catch (e) { /* ignore */ }
+                try {
+                    this[name].stop();
+                    this[name].destroy();
+                } catch (e) { /* ignore */ }
                 this[name] = null;
             }
         });
