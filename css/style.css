@@ -482,3 +482,100 @@ section { padding: 28px 0; }
     color: inherit;
     opacity: 0.95;
 }
+
+/* ============================================================
+   ApexCharts custom tooltips (v4.0)
+   Usamos tooltip.custom en los 5 charts para tener control total
+   sobre el estilo y mostrar contexto rico (status, coverage, etc).
+   ============================================================ */
+
+.apex-tt {
+    background: var(--bg-elevated, #161b22);
+    border: 1px solid var(--border, rgba(48,54,61,0.5));
+    border-radius: 8px;
+    padding: 12px 14px;
+    min-width: 180px;
+    max-width: 320px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    color: var(--text-primary, #e6edf3);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.apex-tt-title {
+    font-weight: 700;
+    font-size: 12.5px;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border, rgba(48,54,61,0.5));
+    color: var(--text-primary, #e6edf3);
+}
+
+.apex-tt-body {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary, #e6edf3);
+    padding: 4px 0;
+}
+
+.apex-tt-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 3px 0;
+}
+
+.apex-tt-k {
+    color: var(--text-secondary, #8b949e);
+    font-size: 11px;
+    font-weight: 500;
+    flex: 0 0 auto;
+}
+
+.apex-tt-v {
+    color: var(--text-primary, #e6edf3);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.apex-tt-v.apex-tt-warn { color: var(--warning, #d29922); }
+
+.apex-tt-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+.apex-tt-hint {
+    font-size: 10.5px;
+    color: var(--text-muted, #6e7681);
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border, rgba(48,54,61,0.5));
+    font-style: italic;
+}
+
+/* Override de ApexCharts default tooltip container */
+.apexcharts-tooltip.apex-tt-wrap,
+.apexcharts-tooltip {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+/* Hide the default ApexCharts tooltip header cuando usamos custom */
+.apexcharts-tooltip-title { display: none !important; }
+
+/* Cursor pointer on chart datapoints to show interactivity */
+.apexcharts-series path,
+.apexcharts-series rect,
+.apexcharts-datalabel { cursor: pointer; }
+
+/* Menu dropdown (three-dot menu) — oculto porque ya tenemos toolbar: false */
+.apexcharts-menu { display: none !important; }
