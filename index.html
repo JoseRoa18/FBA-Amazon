@@ -14,7 +14,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="js/config.js"></script>
 
-    <link rel="stylesheet" href="css/style.css?v=4.1">
+    <link rel="stylesheet" href="css/style.css?v=4.2">
 </head>
 <body>
 
@@ -25,7 +25,7 @@
             <i class="fas fa-cubes"></i>
             <span>FBA Analyzer</span>
         </div>
-        <span class="version-badge">v3.4</span>
+        <span class="version-badge">v4.2</span>
     </div>
     <div class="d-flex align-items-center gap-3">
         <div class="marketplace-toggle">
@@ -50,8 +50,8 @@
     <span id="config-status-text"></span>
 </div>
 
-<!-- Upload Section -->
-<section class="upload-section">
+<!-- Upload Section (expanded state) -->
+<section class="upload-section" id="upload-section">
     <div class="container-fluid px-4">
         <div class="section-header">
             <h2><i class="fas fa-cloud-arrow-up me-2"></i>Upload reports</h2>
@@ -94,6 +94,22 @@
     </div>
 </section>
 
+<!-- Upload Section (collapsed state — bar after run analysis) -->
+<section class="upload-collapsed" id="upload-collapsed" style="display:none;">
+    <div class="container-fluid px-4">
+        <div class="upload-collapsed-bar">
+            <div class="upload-collapsed-info">
+                <i class="fas fa-circle-check me-2"></i>
+                <span id="upload-collapsed-text">Files loaded</span>
+                <span class="upload-collapsed-time" id="upload-collapsed-time"></span>
+            </div>
+            <button id="upload-expand-btn" class="btn-clear btn-clear-ghost">
+                <i class="fas fa-arrow-rotate-left me-1"></i>Change files
+            </button>
+        </div>
+    </div>
+</section>
+
 <!-- KPI Dashboard -->
 <section class="kpi-section" id="kpi-section" style="display:none;">
     <div class="container-fluid px-4">
@@ -109,113 +125,84 @@
             </div>
         </div>
 
-        <div class="row g-3 mb-3">
-            <div class="col-6 col-lg-3">
-                <div class="kpi-card kpi-total" id="card-total">
-                    <div class="kpi-icon"><i class="fas fa-boxes-stacked"></i></div>
-                    <div class="kpi-body">
-                        <span class="kpi-value" id="kpi-total-skus">0</span>
-                        <span class="kpi-label">Total SKUs</span>
-                    </div>
+        <!-- KPI Row 1 — Inventory health summary (5 cards) -->
+        <div class="kpi-row">
+            <div class="kpi-card kpi-total" id="card-total">
+                <div class="kpi-icon"><i class="fas fa-boxes-stacked"></i></div>
+                <div class="kpi-body">
+                    <span class="kpi-value" id="kpi-total-skus">0</span>
+                    <span class="kpi-label">Total SKUs</span>
                 </div>
             </div>
-            <div class="col-6 col-lg-3">
-                <div class="kpi-card kpi-danger clickable" id="card-oos" data-filter="oos">
-                    <div class="kpi-icon"><i class="fas fa-triangle-exclamation"></i></div>
-                    <div class="kpi-body">
-                        <span class="kpi-value" id="kpi-oos">0</span>
-                        <span class="kpi-label">Out of stock</span>
-                    </div>
-                    <span class="kpi-badge">Amazon = 0</span>
+            <div class="kpi-card kpi-danger clickable" id="card-oos" data-filter="oos" title="Amazon = 0">
+                <div class="kpi-icon"><i class="fas fa-triangle-exclamation"></i></div>
+                <div class="kpi-body">
+                    <span class="kpi-value" id="kpi-oos">0</span>
+                    <span class="kpi-label">Out of stock</span>
                 </div>
             </div>
-            <div class="col-6 col-lg-3">
-                <div class="kpi-card kpi-warning clickable" id="card-low" data-filter="low">
-                    <div class="kpi-icon"><i class="fas fa-battery-quarter"></i></div>
-                    <div class="kpi-body">
-                        <span class="kpi-value" id="kpi-low">0</span>
-                        <span class="kpi-label">Critical stock</span>
-                    </div>
-                    <span class="kpi-badge">&lt; 30 days</span>
+            <div class="kpi-card kpi-warning clickable" id="card-low" data-filter="low" title="Less than 30 days of coverage">
+                <div class="kpi-icon"><i class="fas fa-battery-quarter"></i></div>
+                <div class="kpi-body">
+                    <span class="kpi-value" id="kpi-low">0</span>
+                    <span class="kpi-label">Critical stock</span>
                 </div>
             </div>
-            <div class="col-6 col-lg-3">
-                <div class="kpi-card kpi-success clickable" id="card-healthy" data-filter="healthy">
-                    <div class="kpi-icon"><i class="fas fa-shield-check"></i></div>
-                    <div class="kpi-body">
-                        <span class="kpi-value" id="kpi-healthy">0</span>
-                        <span class="kpi-label">Healthy stock</span>
-                    </div>
-                    <span class="kpi-badge">≥ 30 days</span>
+            <div class="kpi-card kpi-success clickable" id="card-healthy" data-filter="healthy" title="30 to 120 days of coverage">
+                <div class="kpi-icon"><i class="fas fa-shield-check"></i></div>
+                <div class="kpi-body">
+                    <span class="kpi-value" id="kpi-healthy">0</span>
+                    <span class="kpi-label">Healthy stock</span>
+                </div>
+            </div>
+            <div class="kpi-card kpi-overstock clickable" id="card-overstock" data-filter="overstock" title="More than 120 days of coverage">
+                <div class="kpi-icon"><i class="fas fa-arrow-up-right-dots"></i></div>
+                <div class="kpi-body">
+                    <span class="kpi-value" id="kpi-overstock">0</span>
+                    <span class="kpi-label">Overstocked</span>
                 </div>
             </div>
         </div>
 
-        <div class="row g-3 mb-3">
-            <div class="col-6 col-lg-3">
-                <div class="kpi-card kpi-info clickable" id="card-tosend" data-filter="tosend">
-                    <div class="kpi-icon"><i class="fas fa-truck-fast"></i></div>
-                    <div class="kpi-body">
-                        <span class="kpi-value" id="kpi-tosend">0</span>
-                        <span class="kpi-label">Units to send</span>
-                    </div>
+        <!-- KPI Row 2 — Action summary (3 cards centered) -->
+        <div class="kpi-row kpi-row-action">
+            <div class="kpi-card kpi-info clickable" id="card-tosend" data-filter="tosend" title="Units that need to be shipped">
+                <div class="kpi-icon"><i class="fas fa-truck-fast"></i></div>
+                <div class="kpi-body">
+                    <span class="kpi-value" id="kpi-tosend">0</span>
+                    <span class="kpi-label">Units to send</span>
                 </div>
             </div>
-            <div class="col-6 col-lg-3">
-                <div class="kpi-card kpi-inbound clickable" id="card-inbound" data-filter="inbound">
-                    <div class="kpi-icon"><i class="fas fa-parachute-box"></i></div>
-                    <div class="kpi-body">
-                        <span class="kpi-value" id="kpi-inbound">0</span>
-                        <span class="kpi-label">Inbound / transit</span>
-                    </div>
-                    <span class="kpi-badge">ETA active</span>
+            <div class="kpi-card kpi-inbound clickable" id="card-inbound" data-filter="inbound" title="SKUs with active ETA">
+                <div class="kpi-icon"><i class="fas fa-parachute-box"></i></div>
+                <div class="kpi-body">
+                    <span class="kpi-value" id="kpi-inbound">0</span>
+                    <span class="kpi-label">Inbound / transit</span>
                 </div>
             </div>
-            <div class="col-6 col-lg-3">
-                <div class="kpi-card kpi-warehouse clickable" id="card-nowarehouse" data-filter="nowarehouse">
-                    <div class="kpi-icon"><i class="fas fa-box-open"></i></div>
-                    <div class="kpi-body">
-                        <span class="kpi-value" id="kpi-nowarehouse">0</span>
-                        <span class="kpi-label">No warehouse stock</span>
-                    </div>
-                    <span class="kpi-badge">Stylish = 0</span>
-                </div>
-            </div>
-            <div class="col-6 col-lg-3">
-                <div class="kpi-card kpi-overstock clickable" id="card-overstock" data-filter="overstock">
-                    <div class="kpi-icon"><i class="fas fa-arrow-up-right-dots"></i></div>
-                    <div class="kpi-body">
-                        <span class="kpi-value" id="kpi-overstock">0</span>
-                        <span class="kpi-label">Overstocked</span>
-                    </div>
-                    <span class="kpi-badge">&gt; 120 days</span>
+            <div class="kpi-card kpi-warehouse clickable" id="card-nowarehouse" data-filter="nowarehouse" title="Stylish inventory = 0">
+                <div class="kpi-icon"><i class="fas fa-box-open"></i></div>
+                <div class="kpi-body">
+                    <span class="kpi-value" id="kpi-nowarehouse">0</span>
+                    <span class="kpi-label">No warehouse stock</span>
                 </div>
             </div>
         </div>
 
-        <div class="row g-3 mb-4">
-            <div class="col-6 col-lg-3">
-                <div class="kpi-card kpi-fba clickable" id="card-infba" data-filter="infba">
-                    <div class="kpi-icon"><i class="fas fa-warehouse"></i></div>
-                    <div class="kpi-body">
-                        <span class="kpi-value" id="kpi-infba">0</span>
-                        <span class="kpi-label">Products in FBA</span>
-                    </div>
-                    <span class="kpi-badge">Total units &gt; 0</span>
-                </div>
-            </div>
-            <div class="col-6 col-lg-3">
-                <div class="kpi-card kpi-prime clickable" id="card-inprime" data-filter="inprime">
-                    <div class="kpi-icon"><i class="fas fa-crown"></i></div>
-                    <div class="kpi-body">
-                        <span class="kpi-value" id="kpi-inprime">0</span>
-                        <span class="kpi-label">Products in Prime</span>
-                    </div>
-                    <span class="kpi-badge">Available &gt; 0</span>
-                </div>
-            </div>
+        <!-- Context info strip (FBA + Prime counts as text, not cards) -->
+        <div class="context-strip">
+            <span class="context-item clickable-text" id="ctx-infba" data-filter="infba">
+                <i class="fas fa-warehouse"></i>
+                <strong id="kpi-infba">0</strong> <span>products in FBA</span>
+            </span>
+            <span class="context-sep">·</span>
+            <span class="context-item clickable-text" id="ctx-inprime" data-filter="inprime">
+                <i class="fas fa-crown"></i>
+                <strong id="kpi-inprime">0</strong> <span>available for Prime</span>
+            </span>
         </div>
 
+        <!-- Charts Row 1 (3 charts) -->
         <div class="row g-3 mb-3">
             <div class="col-lg-4">
                 <div class="chart-card">
@@ -237,6 +224,7 @@
             </div>
         </div>
 
+        <!-- Charts Row 2 (full-width coverage) -->
         <div class="row g-3 mb-4">
             <div class="col-lg-12">
                 <div class="chart-card">
@@ -249,110 +237,28 @@
 </section>
 
 <!-- Filters + Table -->
-<section class="table-section" id="table-section" style="display:none;">
+<!-- Not Prime Section (full-width, priority action) -->
+<section class="np-section" id="np-section" style="display:none;">
     <div class="container-fluid px-4">
-        <div class="row g-3">
-
-            <!-- LEFT: Detail View (main table, filters) -->
-            <div class="col-xl-8 col-lg-12">
-                <div class="section-header">
-                    <h2><i class="fas fa-table-columns me-2"></i>Detail view</h2>
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="badge-count" id="filter-count">0 items</span>
-                        <button id="export-btn" class="btn-export" disabled>
-                            <i class="fas fa-file-arrow-down me-1"></i>Export CSV
-                        </button>
-                    </div>
-                </div>
-
-                <div class="filter-bar">
-                    <div class="filter-group">
-                        <label>FBA</label>
-                        <select class="filter-select" id="filter-fba">
-                            <option value="">All</option>
-                            <option value="YES">YES</option>
-                            <option value="Pending">Pending</option>
-                        </select>
-                    </div>
-                    <div class="filter-group">
-                        <label>SKU</label>
-                        <input type="text" class="filter-input" id="filter-sku" placeholder="Search...">
-                    </div>
-                    <div class="filter-group">
-                        <label>Category</label>
-                        <select class="filter-select" id="filter-category">
-                            <option value="">All categories</option>
-                        </select>
-                    </div>
-                    <div class="filter-group">
-                        <label>Send method</label>
-                        <select class="filter-select" id="filter-send-method">
-                            <option value="">All methods</option>
-                            <option value="Pallet">Pallet</option>
-                            <option value="Carton">Carton</option>
-                            <option value="Loose">Loose</option>
-                        </select>
-                    </div>
-                    <div class="filter-group">
-                        <label>&nbsp;</label>
-                        <label class="filter-checkbox">
-                            <input type="checkbox" id="filter-qty-to-send">
-                            <span>Only Qty &gt; 0</span>
-                        </label>
-                    </div>
-                    <div class="filter-group">
-                        <label>&nbsp;</label>
-                        <button id="clear-filters" class="btn-clear"><i class="fas fa-xmark me-1"></i>Clear</button>
-                    </div>
-                </div>
-
-                <div class="table-scroll-wrapper">
-                    <table class="data-table" id="results-table">
-                        <thead>
-                            <tr>
-                                <th>SKU</th>
-                                <th>FBA</th>
-                                <th>Category</th>
-                                <th class="text-end">Sold 30d</th>
-                                <th class="text-end" id="th-target">Target 45d</th>
-                                <th class="text-end">Amazon inv.</th>
-                                <th class="text-end">Coverage</th>
-                                <th class="text-end">Pack density</th>
-                                <th class="text-end" id="th-warehouse">Warehouse (CIN7)</th>
-                                <th class="text-end">Stylish inv.</th>
-                                <th class="text-end">Qty to send</th>
-                                <th>Method</th>
-                                <th class="text-end">Pallets</th>
-                                <th>Inbound</th>
-                            </tr>
-                        </thead>
-                        <tbody id="results-body">
-                            <tr>
-                                <td colspan="14" class="empty-state">
-                                    <i class="fas fa-cloud-arrow-up"></i>
-                                    <span>Upload files and run analysis to see results</span>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+        <div class="section-header">
+            <h2>
+                <i class="fas fa-triangle-exclamation me-2" style="color:var(--warning);"></i>
+                FBA · Not Prime
+                <span class="section-subtitle">stock trapped — not available for Prime</span>
+            </h2>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge-count" id="np-count">0 items</span>
+                <button id="np-export-btn" class="btn-export" disabled>
+                    <i class="fas fa-file-arrow-down me-1"></i>Export CSV
+                </button>
             </div>
+        </div>
 
-            <!-- RIGHT: Not in Prime list (FBA > 0 && Available === 0) -->
-            <div class="col-xl-4 col-lg-12">
-                <div class="section-header">
-                    <h2>
-                        <i class="fas fa-triangle-exclamation me-2" style="color:var(--warning);"></i>
-                        FBA · Not Prime
-                    </h2>
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="badge-count" id="np-count">0 items</span>
-                        <button id="np-export-btn" class="btn-export" disabled>
-                            <i class="fas fa-file-arrow-down me-1"></i>CSV
-                        </button>
-                    </div>
-                </div>
+        <div class="np-status-bar" id="np-sync-status"></div>
 
+        <div class="row g-3">
+            <!-- Left: compact table with filters -->
+            <div class="col-lg-7">
                 <div class="filter-bar filter-bar-compact">
                     <div class="filter-group" style="flex:1; min-width:0;">
                         <label>Search</label>
@@ -368,13 +274,7 @@
                     </div>
                 </div>
 
-                <div class="np-hint">
-                    <i class="fas fa-circle-info me-1"></i>
-                    Productos con stock total en FBA pero 0 disponible para Prime
-                    <span id="np-sync-status" class="np-sync-status"></span>
-                </div>
-
-                <div class="table-scroll-wrapper">
+                <div class="table-scroll-wrapper np-table-wrapper">
                     <table class="data-table compact-table" id="np-table">
                         <thead>
                             <tr>
@@ -393,14 +293,113 @@
                         </tbody>
                     </table>
                 </div>
+            </div>
 
-                <!-- Histogram de distribución de días -->
+            <!-- Right: histogram -->
+            <div class="col-lg-5">
                 <div class="chart-card np-histogram" id="np-histogram-card" style="display:none;">
                     <h6 class="chart-title">Unavailable days · distribution</h6>
                     <div class="chart-wrap chart-wrap-sm"><div id="chart-np-days"></div></div>
                 </div>
+                <div class="chart-card np-empty" id="np-empty-card">
+                    <div class="np-empty-state">
+                        <i class="fas fa-circle-check"></i>
+                        <p>All FBA stock is Prime-available</p>
+                        <small>Great job keeping inventory healthy</small>
+                    </div>
+                </div>
             </div>
+        </div>
+    </div>
+</section>
 
+<!-- Detail View Section (full-width, main source of truth) -->
+<section class="table-section" id="table-section" style="display:none;">
+    <div class="container-fluid px-4">
+        <div class="section-header">
+            <h2>
+                <i class="fas fa-table-columns me-2"></i>
+                Detail view
+                <span class="section-subtitle">full inventory breakdown</span>
+            </h2>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge-count" id="filter-count">0 items</span>
+                <button id="export-btn" class="btn-export" disabled>
+                    <i class="fas fa-file-arrow-down me-1"></i>Export CSV
+                </button>
+            </div>
+        </div>
+
+        <div class="filter-bar">
+            <div class="filter-group">
+                <label>FBA</label>
+                <select class="filter-select" id="filter-fba">
+                    <option value="">All</option>
+                    <option value="YES">YES</option>
+                    <option value="Pending">Pending</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>SKU</label>
+                <input type="text" class="filter-input" id="filter-sku" placeholder="Search...">
+            </div>
+            <div class="filter-group">
+                <label>Category</label>
+                <select class="filter-select" id="filter-category">
+                    <option value="">All categories</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Send method</label>
+                <select class="filter-select" id="filter-send-method">
+                    <option value="">All methods</option>
+                    <option value="Pallet">Pallet</option>
+                    <option value="Carton">Carton</option>
+                    <option value="Loose">Loose</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <label class="filter-checkbox">
+                    <input type="checkbox" id="filter-qty-to-send">
+                    <span>Only Qty &gt; 0</span>
+                </label>
+            </div>
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <button id="clear-filters" class="btn-clear"><i class="fas fa-xmark me-1"></i>Clear</button>
+            </div>
+        </div>
+
+        <div class="table-scroll-wrapper">
+            <table class="data-table" id="results-table">
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>FBA</th>
+                        <th>Category</th>
+                        <th class="text-end">Sold 30d</th>
+                        <th class="text-end" id="th-target">Target 45d</th>
+                        <th class="text-end">Amazon inv.</th>
+                        <th class="text-end">Coverage</th>
+                        <th class="text-end">Pack density</th>
+                        <th class="text-end" id="th-warehouse">Warehouse (CIN7)</th>
+                        <th class="text-end">Stylish inv.</th>
+                        <th class="text-end">Qty to send</th>
+                        <th>Method</th>
+                        <th class="text-end">Pallets</th>
+                        <th>Inbound</th>
+                    </tr>
+                </thead>
+                <tbody id="results-body">
+                    <tr>
+                        <td colspan="14" class="empty-state">
+                            <i class="fas fa-cloud-arrow-up"></i>
+                            <span>Upload files and run analysis to see results</span>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
 
         <div class="text-center mt-3 mb-4">
@@ -439,6 +438,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script src="js/app.js?v=4.1" defer></script>
+<script src="js/app.js?v=4.2" defer></script>
 </body>
 </html>
