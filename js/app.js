@@ -837,7 +837,7 @@ class FbaAnalyzer {
                 strokeDashArray: 3,
                 xaxis: { lines: { show: false } },
                 yaxis: { lines: { show: true } },
-                padding: { left: 8, right: 8, top: 0, bottom: 0 },
+                padding: { left: 20, right: 30, top: 10, bottom: 10 },
             },
             tooltip: {
                 theme: t.tooltip,
@@ -892,7 +892,7 @@ class FbaAnalyzer {
             chart: {
                 ...this.apexCommon().chart,
                 type: 'radialBar',
-                height: 300,
+                height: 260,
                 events: {
                     dataPointSelection: (event, ctx, config) => {
                         const idx = config.dataPointIndex ?? config.seriesIndex;
@@ -902,12 +902,12 @@ class FbaAnalyzer {
             },
             plotOptions: {
                 radialBar: {
-                    offsetY: -10,
-                    hollow: { size: '42%', background: 'transparent' },
+                    offsetY: 0,
+                    hollow: { size: '38%', background: 'transparent' },
                     track: {
                         background: t.isDark ? 'rgba(110, 118, 129, 0.15)' : 'rgba(0, 0, 0, 0.05)',
                         strokeWidth: '100%',
-                        margin: 6,
+                        margin: 8,
                     },
                     dataLabels: {
                         name: { show: true, offsetY: -4, fontSize: '12px', color: t.textSecondary, fontFamily: "'DM Sans', sans-serif" },
@@ -998,7 +998,7 @@ class FbaAnalyzer {
             chart: {
                 ...this.apexCommon().chart,
                 type: 'bar',
-                height: 300,
+                height: 260,
                 events: {
                     dataPointSelection: (event, ctx, config) => {
                         const idx = config.dataPointIndex;
@@ -1023,6 +1023,10 @@ class FbaAnalyzer {
                     distributed: true, // colores individuales por barra
                     dataLabels: { position: 'top' },
                 },
+            },
+            grid: {
+                ...this.apexCommon().grid,
+                padding: { left: 20, right: 60, top: 10, bottom: 10 },  // + espacio derecho para los numeros
             },
             colors,
             dataLabels: {
@@ -1135,7 +1139,7 @@ class FbaAnalyzer {
             chart: {
                 ...this.apexCommon().chart,
                 type: 'bar',
-                height: 300,
+                height: 260,
                 stacked: true,
                 events: {
                     dataPointSelection: (event, ctx, config) => {
@@ -1171,6 +1175,10 @@ class FbaAnalyzer {
             },
             colors: [t.palette.oos, t.palette.low, t.palette.healthy, t.palette.overstock],
             dataLabels: { enabled: false }, // solo labels de totales (configurado arriba)
+            grid: {
+                ...this.apexCommon().grid,
+                padding: { left: 20, right: 20, top: 20, bottom: 10 },  // + espacio arriba para los labels de totales
+            },
             legend: {
                 show: true,
                 position: 'bottom',
@@ -1271,7 +1279,7 @@ class FbaAnalyzer {
             chart: {
                 ...this.apexCommon().chart,
                 type: 'bar',
-                height: 280,
+                height: 260,
                 events: {
                     dataPointSelection: (event, ctx, config) => {
                         const idx = config.dataPointIndex;
@@ -1289,6 +1297,10 @@ class FbaAnalyzer {
                     columnWidth: '60%',
                     distributed: true,
                 },
+            },
+            grid: {
+                ...this.apexCommon().grid,
+                padding: { left: 20, right: 20, top: 30, bottom: 10 },  // + espacio arriba para los numeros
             },
             colors,
             dataLabels: {
@@ -1673,6 +1685,10 @@ class FbaAnalyzer {
                     columnWidth: '60%',
                     distributed: true,
                 },
+            },
+            grid: {
+                ...this.apexCommon().grid,
+                padding: { left: 15, right: 15, top: 25, bottom: 5 },
             },
             colors,
             dataLabels: {
