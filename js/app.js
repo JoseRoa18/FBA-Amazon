@@ -33,62 +33,9 @@ class FbaAnalyzer {
         this.chartCategories = null;
         this.chartCoverageDist = null;
 
-        // Chart.js defaults
-        Chart.defaults.color = '#8b949e';
-        Chart.defaults.borderColor = 'rgba(48,54,61,0.5)';
-        Chart.defaults.font.family = "'DM Sans', sans-serif";
-        Chart.defaults.font.size = 12;
-        Chart.defaults.animation = { duration: 300, easing: 'easeOutQuart' };
-        Chart.defaults.plugins.tooltip = {
-            ...Chart.defaults.plugins.tooltip,
-            backgroundColor: 'rgba(13, 17, 23, 0.95)',
-            titleColor: '#e6edf3',
-            bodyColor: '#c9d1d9',
-            borderColor: 'rgba(88, 166, 255, 0.3)',
-            borderWidth: 1,
-            padding: 12,
-            cornerRadius: 8,
-            titleFont: { size: 13, weight: '600', family: "'DM Sans', sans-serif" },
-            bodyFont: { size: 12, family: "'DM Sans', sans-serif" },
-            displayColors: true,
-            boxPadding: 6,
-            caretPadding: 8,
-        };
-
-        // Registrar plugin datalabels globalmente. Por default NO muestra labels (opt-in
-        // por chart) para no ensuciar los charts que no los necesitan.
-        if (window.ChartDataLabels) {
-            Chart.register(ChartDataLabels);
-            Chart.defaults.plugins.datalabels = { display: false };
-        }
-
-        // Plugin custom para texto en el centro del doughnut (total SKUs)
-        this.centerTextPlugin = {
-            id: 'centerText',
-            afterDraw: (chart) => {
-                if (!chart.config.options?.plugins?.centerText?.display) return;
-                const { ctx, chartArea } = chart;
-                if (!chartArea) return;
-                const cfg = chart.config.options.plugins.centerText;
-                const cx = (chartArea.left + chartArea.right) / 2;
-                const cy = (chartArea.top + chartArea.bottom) / 2;
-                const isDark = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark';
-                const colorPrimary = isDark ? '#e6edf3' : '#1f2328';
-                const colorSecondary = isDark ? '#8b949e' : '#59636e';
-
-                ctx.save();
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.font = `700 30px 'DM Sans', sans-serif`;
-                ctx.fillStyle = colorPrimary;
-                ctx.fillText(cfg.value ?? '', cx, cy - 10);
-                ctx.font = `500 11px 'DM Sans', sans-serif`;
-                ctx.fillStyle = colorSecondary;
-                ctx.fillText(cfg.label ?? '', cx, cy + 14);
-                ctx.restore();
-            }
-        };
-        Chart.register(this.centerTextPlugin);
+        // ApexCharts no necesita registro global ni plugins.
+        // Los defaults (colors, tooltip, font) se configuran por chart
+        // en su opciones via this.apexCommon(). Ver helper más abajo.
 
         // Chart instance placeholder for the new histogram
         this.chartNpDays = null;
@@ -840,18 +787,63 @@ class FbaAnalyzer {
 
     // Forzar recrear charts (ej. al cambiar tema claro/oscuro).
     destroyAllCharts() {
-        // Chart.js puede tirar "this._fn is not a function" si se destruye
-        // un chart mientras tiene animaciones pendientes. stop() cancela
-        // la cola de animaciones antes de destroy.
+        // ApexCharts tiene .destroy() simple, sin animation races como Chart.js
         ['chartHealth', 'chartTopSellers', 'chartCategories', 'chartCoverageDist', 'chartNpDays'].forEach(name => {
             if (this[name]) {
-                try {
-                    this[name].stop();
-                    this[name].destroy();
-                } catch (e) { /* ignore */ }
+                try { this[name].destroy(); } catch (e) { /* ignore */ }
                 this[name] = null;
             }
         });
+    }
+
+    // ---- ApexCharts theme helpers ----
+    apexTheme() {
+        const isDark = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark';
+        return {
+            isDark,
+            mode: isDark ? 'dark' : 'light',
+            textPrimary: isDark ? '#e6edf3' : '#1f2328',
+            textSecondary: isDark ? '#8b949e' : '#59636e',
+            border: isDark ? 'rgba(48,54,61,0.5)' : 'rgba(0,0,0,0.08)',
+            bg: isDark ? 'transparent' : 'transparent',
+            tooltip: isDark ? 'dark' : 'light',
+            // Palette semántica (OOS / critical / healthy / overstocked)
+            palette: isDark
+                ? { oos: '#f85149', low: '#d29922', healthy: '#3fb950', overstock: '#e3b341', accent: '#58a6ff', muted: '#6e7681' }
+                : { oos: '#cf222e', low: '#9a6700', healthy: '#1a7f37', overstock: '#bf8700', accent: '#0969da', muted: '#8c959f' }
+        };
+    }
+
+    // Opciones comunes de ApexCharts (fonts, tooltip style, animations, toolbar off)
+    apexCommon() {
+        const t = this.apexTheme();
+        return {
+            chart: {
+                background: 'transparent',
+                fontFamily: "'DM Sans', sans-serif",
+                toolbar: { show: false },
+                zoom: { enabled: false },
+                animations: {
+                    enabled: true,
+                    easing: 'easeinout',
+                    speed: 500,
+                    animateGradually: { enabled: true, delay: 80 },
+                    dynamicAnimation: { enabled: true, speed: 300 },
+                },
+            },
+            theme: { mode: t.mode },
+            grid: {
+                borderColor: t.border,
+                strokeDashArray: 3,
+                xaxis: { lines: { show: false } },
+                yaxis: { lines: { show: true } },
+                padding: { left: 8, right: 8, top: 0, bottom: 0 },
+            },
+            tooltip: {
+                theme: t.tooltip,
+                style: { fontFamily: "'DM Sans', sans-serif", fontSize: '12px' },
+            },
+        };
     }
 
     // ---- Chart helpers ----
@@ -873,208 +865,227 @@ class FbaAnalyzer {
     }
 
     renderHealthChart(oos, low, healthy, overstock) {
-        const newData = [oos, low, healthy, overstock];
         const total = oos + low + healthy + overstock;
+        // Convertir conteos absolutos a porcentajes (radialBar usa % 0-100)
+        const pct = (n) => total ? +((n / total) * 100).toFixed(1) : 0;
+        // Guardamos los counts absolutos para usar en tooltip/labels
+        const counts = [oos, low, healthy, overstock];
+        const series = [pct(oos), pct(low), pct(healthy), pct(overstock)];
+        const labels = ['Out of stock', 'Critical (<30d)', 'Healthy', 'Overstocked (>120d)'];
 
+        // Update in-place si ya existe
         if (this.chartHealth) {
-            this.chartHealth.data.datasets[0].data = newData;
-            // Actualizar el texto central con el total activo
-            if (this.chartHealth.options.plugins.centerText) {
-                this.chartHealth.options.plugins.centerText.value = total;
-            }
-            this.chartHealth.update('none');
+            this.chartHealth.updateSeries(series);
+            this.chartHealth._counts = counts;
+            this.chartHealth._total = total;
             return;
         }
 
-        const ctx = document.getElementById('chart-health');
-        if (!ctx) return;
-        const isDark = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark';
-        // Filtros KPI asociados a cada segmento (click → activa ese filtro)
+        const el = document.getElementById('chart-health');
+        if (!el) return;
+        const t = this.apexTheme();
         const kpiMap = ['oos', 'low', 'healthy', 'overstock'];
 
-        this.chartHealth = new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: ['Out of stock', 'Critical (<30d)', 'Healthy', 'Overstocked (>120d)'],
-                datasets: [{
-                    data: newData,
-                    backgroundColor: isDark ? ['#f85149','#d29922','#3fb950','#e3b341'] : ['#cf222e','#9a6700','#1a7f37','#bf8700'],
-                    hoverBackgroundColor: isDark ? ['#ff6b64','#e0a832','#52c962','#f2c34b'] : ['#e03742','#ad7500','#2a8f47','#cc9100'],
-                    borderWidth: 0, spacing: 3, borderRadius: 6, hoverOffset: 12,
-                    borderColor: isDark ? '#0d1117' : '#ffffff',
-                }]
+        const options = {
+            ...this.apexCommon(),
+            series,
+            chart: {
+                ...this.apexCommon().chart,
+                type: 'radialBar',
+                height: 300,
+                events: {
+                    dataPointSelection: (event, ctx, config) => {
+                        const idx = config.dataPointIndex ?? config.seriesIndex;
+                        if (idx != null && kpiMap[idx]) this.toggleKpiFilter(kpiMap[idx]);
+                    },
+                },
             },
-            options: {
-                responsive: true, maintainAspectRatio: false, cutout: '72%',
-                onHover: (evt, elements) => {
-                    evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
-                },
-                onClick: (evt, elements) => {
-                    if (!elements.length) return;
-                    const idx = elements[0].index;
-                    this.toggleKpiFilter(kpiMap[idx]);
-                },
-                plugins: {
-                    centerText: { display: true, value: total, label: 'Total SKUs' },
-                    legend: {
-                        position: 'bottom',
-                        labels: {
-                            padding: 16, usePointStyle: true, pointStyleWidth: 10, font: { size: 11 },
-                            generateLabels: (chart) => {
-                                const data = chart.data.datasets[0].data;
-                                const tot = data.reduce((a, b) => a + b, 0);
-                                return chart.data.labels.map((label, i) => {
-                                    const pct = tot ? ((data[i] / tot) * 100).toFixed(0) : 0;
-                                    return {
-                                        text: `${label}: ${data[i]} (${pct}%)`,
-                                        fillStyle: chart.data.datasets[0].backgroundColor[i],
-                                        strokeStyle: chart.data.datasets[0].backgroundColor[i],
-                                        pointStyle: 'circle',
-                                        hidden: chart.getDatasetMeta(0).data[i]?.hidden,
-                                        index: i,
-                                    };
-                                });
-                            }
-                        }
+            plotOptions: {
+                radialBar: {
+                    offsetY: -10,
+                    hollow: { size: '42%', background: 'transparent' },
+                    track: {
+                        background: t.isDark ? 'rgba(110, 118, 129, 0.15)' : 'rgba(0, 0, 0, 0.05)',
+                        strokeWidth: '100%',
+                        margin: 6,
                     },
-                    tooltip: {
-                        callbacks: {
-                            label: (c) => {
-                                const tot = c.dataset.data.reduce((a, b) => a + b, 0);
-                                const pct = tot ? ((c.parsed / tot) * 100).toFixed(1) : 0;
-                                return ` ${c.label}: ${c.parsed} SKUs (${pct}%)`;
-                            },
-                            afterLabel: () => '  ↳ click to filter table'
-                        }
+                    dataLabels: {
+                        name: { show: true, offsetY: -4, fontSize: '12px', color: t.textSecondary, fontFamily: "'DM Sans', sans-serif" },
+                        value: { show: true, offsetY: 4, fontSize: '28px', fontWeight: 700, color: t.textPrimary, formatter: () => String(total) },
+                        total: {
+                            show: true,
+                            label: 'Total SKUs',
+                            color: t.textSecondary,
+                            fontSize: '11px',
+                            fontFamily: "'DM Sans', sans-serif",
+                            fontWeight: 500,
+                            formatter: () => String(total),
+                        },
                     },
-                    datalabels: {
-                        display: (context) => {
-                            // Solo muestra el % si el segmento es >= 5% (para que no se encimen)
-                            const tot = context.dataset.data.reduce((a, b) => a + b, 0);
-                            return tot > 0 && (context.dataset.data[context.dataIndex] / tot) >= 0.05;
-                        },
-                        color: '#fff',
-                        font: { weight: '700', size: 12, family: "'DM Sans', sans-serif" },
-                        formatter: (value, context) => {
-                            const tot = context.dataset.data.reduce((a, b) => a + b, 0);
-                            return tot ? `${((value / tot) * 100).toFixed(0)}%` : '';
-                        },
-                        textStrokeColor: 'rgba(0,0,0,0.4)',
-                        textStrokeWidth: 2,
-                    }
-                }
-            }
-        });
+                },
+            },
+            colors: [t.palette.oos, t.palette.low, t.palette.healthy, t.palette.overstock],
+            labels,
+            stroke: { lineCap: 'round' },
+            legend: {
+                show: true,
+                position: 'bottom',
+                horizontalAlign: 'center',
+                fontFamily: "'DM Sans', sans-serif",
+                fontSize: '11px',
+                labels: { colors: t.textSecondary, useSeriesColors: false },
+                markers: { width: 10, height: 10, radius: 5 },
+                itemMargin: { horizontal: 8, vertical: 3 },
+                formatter: (seriesName, opts) => {
+                    const i = opts.seriesIndex;
+                    const c = counts[i];
+                    const p = series[i];
+                    return `${seriesName}: ${c} (${p}%)`;
+                },
+            },
+            tooltip: {
+                ...this.apexCommon().tooltip,
+                enabled: true,
+                custom: ({ seriesIndex }) => {
+                    const c = counts[seriesIndex];
+                    const p = series[seriesIndex];
+                    return `<div class="apex-tt">
+                        <div class="apex-tt-title">${labels[seriesIndex]}</div>
+                        <div class="apex-tt-body">${c} SKUs (${p}%)</div>
+                        <div class="apex-tt-hint">↳ click to filter table</div>
+                    </div>`;
+                },
+            },
+        };
+
+        this.chartHealth = new ApexCharts(el, options);
+        this.chartHealth.render();
+        this.chartHealth._counts = counts;
+        this.chartHealth._total = total;
     }
 
     renderTopSellersChart(data) {
         const top = [...data].sort((a, b) => b.units_sold - a.units_sold).slice(0, 10);
-        const labels = top.map(i => i.sku);
+        // ApexCharts horizontal bar: categories = labels, y-axis data = values
+        const categories = top.map(i => i.sku);
         const values = top.map(i => i.units_sold);
-        // Guardamos el item completo por bar para tooltip rico + click handler
-        const items = top.slice();
+        const t = this.apexTheme();
 
+        // Clasificación por SKU → color por estado de salud
+        const healthColorFor = (item) => {
+            const cls = this.classify(item);
+            return t.palette[cls] || t.palette.healthy;
+        };
+        const colors = top.map(i => healthColorFor(i));
+
+        // Update in-place (el dataset + colors + categorías cambian al filtrar)
         if (this.chartTopSellers) {
-            this.chartTopSellers.data.labels = labels;
-            this.chartTopSellers.data.datasets[0].data = values;
-            this.chartTopSellers.data.datasets[0].items = items;
-            this.chartTopSellers.update('none');
+            this.chartTopSellers.updateOptions({
+                series: [{ name: 'Units sold', data: values }],
+                xaxis: { categories },
+                colors,
+            });
+            this.chartTopSellers._items = top;
             return;
         }
 
-        const ctx = document.getElementById('chart-top-sellers');
-        if (!ctx) return;
-        const isDark = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark';
-        const gridC = isDark ? 'rgba(48,54,61,0.3)' : 'rgba(0,0,0,0.06)';
+        const el = document.getElementById('chart-top-sellers');
+        if (!el) return;
 
-        // Color por estado de salud (clasifica el SKU → mapea a color)
-        const healthColorFor = (item) => {
-            const cls = this.classify(item);
-            const palette = isDark
-                ? { oos: '#f85149', low: '#d29922', healthy: '#3fb950', overstock: '#e3b341' }
-                : { oos: '#cf222e', low: '#9a6700', healthy: '#1a7f37', overstock: '#bf8700' };
-            return palette[cls] || palette.healthy;
-        };
-
-        this.chartTopSellers = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels,
-                datasets: [{
-                    data: values,
-                    items,
-                    backgroundColor: (c) => {
-                        const it = c.dataset.items?.[c.dataIndex];
-                        if (!it) return isDark ? '#58a6ff' : '#0969da';
-                        return this.makeGradient(c, healthColorFor(it), 0.95, 0.3);
-                    },
-                    hoverBackgroundColor: (c) => {
-                        const it = c.dataset.items?.[c.dataIndex];
-                        return it ? healthColorFor(it) : (isDark ? '#58a6ff' : '#0969da');
-                    },
-                    borderRadius: 6, barThickness: 18,
-                }]
-            },
-            options: {
-                indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-                layout: { padding: { right: 50 } }, // espacio para data labels al final
-                onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
-                onClick: (evt, elements) => {
-                    if (!elements.length) return;
-                    const idx = elements[0].index;
-                    const sku = this.chartTopSellers.data.labels[idx];
-                    const input = document.getElementById('filter-sku');
-                    if (input) {
-                        input.value = sku;
-                        this.applyFilters();
-                    }
-                },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        padding: 14,
-                        callbacks: {
-                            title: (ctx) => {
-                                const it = ctx[0].dataset.items?.[ctx[0].dataIndex];
-                                return it ? `${it.sku} · ${it.category || 'Sin categoría'}` : ctx[0].label;
-                            },
-                            label: (c) => {
-                                const it = c.dataset.items?.[c.dataIndex];
-                                if (!it) return ` ${c.parsed.x} units sold`;
-                                const cls = this.classify(it);
-                                const statusLabel = { oos: '🔴 Out of stock', low: '🟡 Critical (<30d)', healthy: '🟢 Healthy', overstock: '🟠 Overstocked' }[cls];
-                                const cov = it.coverage_days >= 999 ? '∞' : `${it.coverage_days}d`;
-                                return [
-                                    ` ${it.units_sold.toLocaleString()} units sold (30d)`,
-                                    ` Amazon inv: ${it.inventory_amazon.toLocaleString()}`,
-                                    ` Coverage: ${cov}`,
-                                    ` Status: ${statusLabel}`,
-                                    it.qty_to_send > 0 ? ` → Need to send: ${it.qty_to_send.toLocaleString()} units` : null,
-                                ].filter(Boolean);
-                            },
-                            afterBody: () => ['', '  ↳ click to filter by this SKU']
+        const options = {
+            ...this.apexCommon(),
+            series: [{ name: 'Units sold', data: values }],
+            chart: {
+                ...this.apexCommon().chart,
+                type: 'bar',
+                height: 300,
+                events: {
+                    dataPointSelection: (event, ctx, config) => {
+                        const idx = config.dataPointIndex;
+                        if (idx == null) return;
+                        const sku = this.chartTopSellers?._items?.[idx]?.sku;
+                        if (sku) {
+                            const input = document.getElementById('filter-sku');
+                            if (input) {
+                                input.value = sku;
+                                this.applyFilters();
+                            }
                         }
                     },
-                    datalabels: {
-                        display: true,
-                        anchor: 'end', align: 'end',
-                        color: isDark ? '#c9d1d9' : '#1f2328',
-                        font: { weight: '600', size: 11, family: "'JetBrains Mono', monospace" },
-                        formatter: (v) => v.toLocaleString('en-US'),
-                        padding: { left: 6 },
-                    }
                 },
-                scales: {
-                    x: { beginAtZero: true, grid: { color: gridC, drawBorder: false } },
-                    y: { grid: { display: false, drawBorder: false }, ticks: { font: { family: "'JetBrains Mono'", size: 10 } } }
-                }
-            }
-        });
+            },
+            plotOptions: {
+                bar: {
+                    horizontal: true,
+                    barHeight: '65%',
+                    borderRadius: 4,
+                    borderRadiusApplication: 'end',
+                    distributed: true, // colores individuales por barra
+                    dataLabels: { position: 'top' },
+                },
+            },
+            colors,
+            dataLabels: {
+                enabled: true,
+                offsetX: 32,
+                style: {
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    colors: [t.textPrimary],
+                },
+                formatter: (v) => v.toLocaleString('en-US'),
+            },
+            legend: { show: false },
+            xaxis: {
+                categories,
+                labels: { style: { colors: t.textSecondary, fontSize: '11px' } },
+                axisBorder: { show: false },
+                axisTicks: { show: false },
+            },
+            yaxis: {
+                labels: {
+                    style: {
+                        colors: t.textPrimary,
+                        fontSize: '11px',
+                        fontFamily: "'JetBrains Mono', monospace",
+                    },
+                },
+            },
+            tooltip: {
+                ...this.apexCommon().tooltip,
+                custom: ({ dataPointIndex }) => {
+                    const it = this.chartTopSellers?._items?.[dataPointIndex] || top[dataPointIndex];
+                    if (!it) return '';
+                    const cls = this.classify(it);
+                    const statusLabel = { oos: '🔴 Out of stock', low: '🟡 Critical (<30d)', healthy: '🟢 Healthy', overstock: '🟠 Overstocked' }[cls];
+                    const cov = it.coverage_days >= 999 ? '∞' : `${it.coverage_days}d`;
+                    const sendLine = it.qty_to_send > 0
+                        ? `<div class="apex-tt-line"><span class="apex-tt-k">Need to send</span><span class="apex-tt-v apex-tt-warn">${it.qty_to_send.toLocaleString()}</span></div>` : '';
+                    return `<div class="apex-tt">
+                        <div class="apex-tt-title">${this.esc(it.sku)} · ${this.esc(it.category || 'Sin categoría')}</div>
+                        <div class="apex-tt-line"><span class="apex-tt-k">Sold 30d</span><span class="apex-tt-v">${it.units_sold.toLocaleString()}</span></div>
+                        <div class="apex-tt-line"><span class="apex-tt-k">Amazon inv</span><span class="apex-tt-v">${it.inventory_amazon.toLocaleString()}</span></div>
+                        <div class="apex-tt-line"><span class="apex-tt-k">Coverage</span><span class="apex-tt-v">${cov}</span></div>
+                        <div class="apex-tt-line"><span class="apex-tt-k">Status</span><span class="apex-tt-v">${statusLabel}</span></div>
+                        ${sendLine}
+                        <div class="apex-tt-hint">↳ click to filter by this SKU</div>
+                    </div>`;
+                },
+            },
+            states: {
+                hover: { filter: { type: 'lighten', value: 0.1 } },
+                active: { filter: { type: 'darken', value: 0.15 } },
+            },
+        };
+
+        this.chartTopSellers = new ApexCharts(el, options);
+        this.chartTopSellers.render();
+        this.chartTopSellers._items = top;
     }
 
     renderCategoriesChart(data) {
-        // Agrupamos por categoría Y además clasificamos cada SKU por estado de salud
-        // para tener composición (no solo conteo) en stacked bars
+        // Agrupamos por categoría Y clasificamos cada SKU por estado de salud
         const catMap = {};
         data.forEach(i => {
             const cat = i.category || 'Other';
@@ -1084,124 +1095,148 @@ class FbaAnalyzer {
             catMap[cat].total++;
         });
         const sorted = Object.entries(catMap).sort((a, b) => b[1].total - a[1].total).slice(0, 8);
-        const labels = sorted.map(s => s[0]);
-        const oosData = sorted.map(s => s[1].oos);
-        const lowData = sorted.map(s => s[1].low);
-        const healthyData = sorted.map(s => s[1].healthy);
-        const overData = sorted.map(s => s[1].overstock);
+        const categories = sorted.map(s => s[0]);
         const totals = sorted.map(s => s[1].total);
+        const seriesData = {
+            oos:       sorted.map(s => s[1].oos),
+            low:       sorted.map(s => s[1].low),
+            healthy:   sorted.map(s => s[1].healthy),
+            overstock: sorted.map(s => s[1].overstock),
+        };
 
+        // Update in-place (ApexCharts maneja stack nativamente)
         if (this.chartCategories) {
-            this.chartCategories.data.labels = labels;
-            this.chartCategories.data.datasets[0].data = oosData;
-            this.chartCategories.data.datasets[1].data = lowData;
-            this.chartCategories.data.datasets[2].data = healthyData;
-            this.chartCategories.data.datasets[3].data = overData;
+            this.chartCategories.updateOptions({
+                series: [
+                    { name: 'Out of stock', data: seriesData.oos },
+                    { name: 'Critical',     data: seriesData.low },
+                    { name: 'Healthy',      data: seriesData.healthy },
+                    { name: 'Overstocked',  data: seriesData.overstock },
+                ],
+                xaxis: { categories },
+            });
             this.chartCategories._totals = totals;
-            this.chartCategories.update('none');
+            this.chartCategories._categories = categories;
             return;
         }
 
-        const ctx = document.getElementById('chart-categories');
-        if (!ctx) return;
-        const isDark = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark';
-        const gridC = isDark ? 'rgba(48,54,61,0.3)' : 'rgba(0,0,0,0.06)';
-        const palette = isDark
-            ? { oos: '#f85149', low: '#d29922', healthy: '#3fb950', overstock: '#e3b341' }
-            : { oos: '#cf222e', low: '#9a6700', healthy: '#1a7f37', overstock: '#bf8700' };
+        const el = document.getElementById('chart-categories');
+        if (!el) return;
+        const t = this.apexTheme();
 
-        const mkDataset = (label, arr, color, kpiKey) => ({
-            label, data: arr, kpiKey,
-            backgroundColor: color,
-            hoverBackgroundColor: this.hexAlpha(color, 1),
-            borderRadius: 4, borderWidth: 0, barThickness: 28,
-            stack: 'health',
-        });
-
-        this.chartCategories = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels,
-                datasets: [
-                    mkDataset('Out of stock',  oosData,     palette.oos,       'oos'),
-                    mkDataset('Critical',      lowData,     palette.low,       'low'),
-                    mkDataset('Healthy',       healthyData, palette.healthy,   'healthy'),
-                    mkDataset('Overstocked',   overData,    palette.overstock, 'overstock'),
-                ]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false,
-                onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
-                onClick: (evt, elements) => {
-                    if (!elements.length) return;
-                    const el = elements[0];
-                    const category = this.chartCategories.data.labels[el.index];
-                    const sel = document.getElementById('filter-category');
-                    if (sel) {
-                        sel.value = category;
-                        this.applyFilters();
-                    }
-                },
-                plugins: {
-                    legend: {
-                        position: 'bottom',
-                        labels: { padding: 12, boxWidth: 10, boxHeight: 10, font: { size: 11 }, usePointStyle: true, pointStyleWidth: 10 }
-                    },
-                    tooltip: {
-                        padding: 14,
-                        callbacks: {
-                            title: (ctx) => {
-                                const idx = ctx[0].dataIndex;
-                                const tot = this.chartCategories?._totals?.[idx] ?? totals[idx];
-                                return `${ctx[0].label} · ${tot} SKUs`;
-                            },
-                            label: (c) => {
-                                const v = c.parsed.y;
-                                const tot = this.chartCategories?._totals?.[c.dataIndex] ?? totals[c.dataIndex];
-                                const pct = tot ? ((v / tot) * 100).toFixed(0) : 0;
-                                return ` ${c.dataset.label}: ${v} (${pct}%)`;
-                            },
-                            afterBody: () => ['', '  ↳ click to filter by category']
+        const options = {
+            ...this.apexCommon(),
+            series: [
+                { name: 'Out of stock', data: seriesData.oos },
+                { name: 'Critical',     data: seriesData.low },
+                { name: 'Healthy',      data: seriesData.healthy },
+                { name: 'Overstocked',  data: seriesData.overstock },
+            ],
+            chart: {
+                ...this.apexCommon().chart,
+                type: 'bar',
+                height: 300,
+                stacked: true,
+                events: {
+                    dataPointSelection: (event, ctx, config) => {
+                        const idx = config.dataPointIndex;
+                        if (idx == null) return;
+                        const category = this.chartCategories?._categories?.[idx] || categories[idx];
+                        const sel = document.getElementById('filter-category');
+                        if (sel && category) {
+                            sel.value = category;
+                            this.applyFilters();
                         }
                     },
-                    datalabels: {
-                        display: (ctx) => {
-                            // Solo mostrar el total en el TOP de la pila (sobre el último dataset)
-                            // con valor > 0 para cada categoría
-                            if (ctx.datasetIndex !== 3) return false;
-                            const idx = ctx.dataIndex;
-                            const tot = this.chartCategories?._totals?.[idx] ?? totals[idx];
-                            return tot > 0;
-                        },
-                        anchor: 'end', align: 'end', offset: 2,
-                        color: isDark ? '#c9d1d9' : '#1f2328',
-                        font: { weight: '700', size: 11, family: "'DM Sans', sans-serif" },
-                        formatter: (value, ctx) => {
-                            const idx = ctx.dataIndex;
-                            return this.chartCategories?._totals?.[idx] ?? totals[idx];
-                        },
-                    }
                 },
-                scales: {
-                    x: { stacked: true, grid: { display: false, drawBorder: false }, ticks: { font: { size: 10 }, maxRotation: 45 } },
-                    y: { stacked: true, beginAtZero: true, grid: { color: gridC, drawBorder: false } }
-                }
-            }
-        });
+            },
+            plotOptions: {
+                bar: {
+                    horizontal: false,
+                    borderRadius: 2,
+                    borderRadiusApplication: 'end',
+                    borderRadiusWhenStacked: 'last',
+                    columnWidth: '55%',
+                    dataLabels: { total: {
+                        enabled: true,
+                        offsetY: -8,
+                        style: {
+                            fontFamily: "'DM Sans', sans-serif",
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            color: t.textPrimary,
+                        },
+                    } },
+                },
+            },
+            colors: [t.palette.oos, t.palette.low, t.palette.healthy, t.palette.overstock],
+            dataLabels: { enabled: false }, // solo labels de totales (configurado arriba)
+            legend: {
+                show: true,
+                position: 'bottom',
+                fontFamily: "'DM Sans', sans-serif",
+                fontSize: '11px',
+                labels: { colors: t.textSecondary },
+                markers: { width: 10, height: 10, radius: 5 },
+                itemMargin: { horizontal: 8, vertical: 3 },
+            },
+            xaxis: {
+                categories,
+                labels: {
+                    style: { colors: t.textSecondary, fontSize: '10px' },
+                    rotate: -35, rotateAlways: categories.length > 5, hideOverlappingLabels: true,
+                },
+                axisBorder: { show: false },
+                axisTicks: { show: false },
+            },
+            yaxis: {
+                labels: { style: { colors: t.textSecondary, fontSize: '11px' } },
+                forceNiceScale: true,
+            },
+            tooltip: {
+                ...this.apexCommon().tooltip,
+                custom: ({ dataPointIndex }) => {
+                    const cat = this.chartCategories?._categories?.[dataPointIndex] || categories[dataPointIndex];
+                    const tot = this.chartCategories?._totals?.[dataPointIndex] ?? totals[dataPointIndex];
+                    const s = sorted[dataPointIndex]?.[1] || { oos: 0, low: 0, healthy: 0, overstock: 0 };
+                    const line = (label, v, color) => {
+                        if (!v) return '';
+                        const pct = tot ? ((v / tot) * 100).toFixed(0) : 0;
+                        return `<div class="apex-tt-line"><span class="apex-tt-dot" style="background:${color}"></span><span class="apex-tt-k">${label}</span><span class="apex-tt-v">${v} (${pct}%)</span></div>`;
+                    };
+                    return `<div class="apex-tt">
+                        <div class="apex-tt-title">${this.esc(cat)} · ${tot} SKUs</div>
+                        ${line('Out of stock', s.oos, t.palette.oos)}
+                        ${line('Critical', s.low, t.palette.low)}
+                        ${line('Healthy', s.healthy, t.palette.healthy)}
+                        ${line('Overstocked', s.overstock, t.palette.overstock)}
+                        <div class="apex-tt-hint">↳ click to filter by category</div>
+                    </div>`;
+                },
+            },
+            states: {
+                hover: { filter: { type: 'lighten', value: 0.08 } },
+                active: { filter: { type: 'darken', value: 0.15 } },
+            },
+        };
+
+        this.chartCategories = new ApexCharts(el, options);
+        this.chartCategories.render();
         this.chartCategories._totals = totals;
+        this.chartCategories._categories = categories;
     }
 
     renderCoverageDistChart(data) {
-        const isDark = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark';
+        const t = this.apexTheme();
         // Cada bucket tiene un filtro KPI asociado (click → activa ese filtro)
         const buckets = [
-            { label: '0d (OOS)',     min: 0,   max: 0,   color: isDark ? '#f85149' : '#cf222e', kpi: 'oos' },
-            { label: '1–15d',        min: 1,   max: 15,  color: isDark ? '#f85149' : '#cf222e', kpi: 'low' },
-            { label: '16–30d',       min: 16,  max: 30,  color: isDark ? '#d29922' : '#9a6700', kpi: 'low' },
-            { label: '31–60d',       min: 31,  max: 60,  color: isDark ? '#3fb950' : '#1a7f37', kpi: 'healthy' },
-            { label: '61–90d',       min: 61,  max: 90,  color: isDark ? '#3fb950' : '#1a7f37', kpi: 'healthy' },
-            { label: '91–120d',      min: 91,  max: 120, color: isDark ? '#3fb950' : '#1a7f37', kpi: 'healthy' },
-            { label: '120+ (over)',  min: 121, max: 998, color: isDark ? '#e3b341' : '#bf8700', kpi: 'overstock' },
+            { label: '0d (OOS)',     min: 0,   max: 0,   color: t.palette.oos,       kpi: 'oos' },
+            { label: '1–15d',        min: 1,   max: 15,  color: t.palette.oos,       kpi: 'low' },
+            { label: '16–30d',       min: 16,  max: 30,  color: t.palette.low,       kpi: 'low' },
+            { label: '31–60d',       min: 31,  max: 60,  color: t.palette.healthy,   kpi: 'healthy' },
+            { label: '61–90d',       min: 61,  max: 90,  color: t.palette.healthy,   kpi: 'healthy' },
+            { label: '91–120d',      min: 91,  max: 120, color: t.palette.healthy,   kpi: 'healthy' },
+            { label: '120+ (over)',  min: 121, max: 998, color: t.palette.overstock, kpi: 'overstock' },
         ];
         const counts = buckets.map(b => data.filter(i => {
             const c = i.coverage_days;
@@ -1212,74 +1247,97 @@ class FbaAnalyzer {
         const cumulative = [];
         let running = 0;
         counts.forEach(n => { running += n; cumulative.push(running); });
+        const categories = buckets.map(b => b.label);
+        const colors = buckets.map(b => b.color);
 
+        // Update in-place
         if (this.chartCoverageDist) {
-            this.chartCoverageDist.data.datasets[0].data = counts;
+            this.chartCoverageDist.updateOptions({
+                series: [{ name: 'SKUs', data: counts }],
+                xaxis: { categories },
+                colors,
+            });
             this.chartCoverageDist._cumulative = cumulative;
             this.chartCoverageDist._buckets = buckets;
-            this.chartCoverageDist.update('none');
             return;
         }
 
-        const ctx = document.getElementById('chart-coverage-dist');
-        if (!ctx) return;
-        const gridC = isDark ? 'rgba(48,54,61,0.3)' : 'rgba(0,0,0,0.06)';
+        const el = document.getElementById('chart-coverage-dist');
+        if (!el) return;
 
-        this.chartCoverageDist = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: buckets.map(b => b.label),
-                datasets: [{
-                    data: counts,
-                    backgroundColor: (c) => this.makeGradient(c, buckets[c.dataIndex]?.color || '#888', 0.85, 0.2),
-                    borderRadius: 8, barPercentage: 0.85,
-                    hoverBackgroundColor: (c) => buckets[c.dataIndex]?.color || '#888',
-                    borderWidth: 0,
-                }]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false,
-                layout: { padding: { top: 20 } },
-                onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
-                onClick: (evt, elements) => {
-                    if (!elements.length) return;
-                    const idx = elements[0].index;
-                    const bucket = this.chartCoverageDist._buckets?.[idx] || buckets[idx];
-                    if (bucket?.kpi) this.toggleKpiFilter(bucket.kpi);
-                },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        padding: 14,
-                        callbacks: {
-                            title: (ctx) => `${ctx[0].label}`,
-                            label: (c) => {
-                                const tot = c.dataset.data.reduce((a, b) => a + b, 0);
-                                const pct = tot ? ((c.parsed.y / tot) * 100).toFixed(1) : 0;
-                                const cum = (this.chartCoverageDist?._cumulative ?? cumulative)[c.dataIndex];
-                                const cumPct = tot ? ((cum / tot) * 100).toFixed(0) : 0;
-                                return [
-                                    ` ${c.parsed.y} SKUs en este rango (${pct}%)`,
-                                    ` ${cum} SKUs acumulados (${cumPct}%)`,
-                                ];
-                            },
-                            afterBody: () => ['', '  ↳ click to filter by status']
-                        }
+        const options = {
+            ...this.apexCommon(),
+            series: [{ name: 'SKUs', data: counts }],
+            chart: {
+                ...this.apexCommon().chart,
+                type: 'bar',
+                height: 280,
+                events: {
+                    dataPointSelection: (event, ctx, config) => {
+                        const idx = config.dataPointIndex;
+                        if (idx == null) return;
+                        const bucket = this.chartCoverageDist?._buckets?.[idx] || buckets[idx];
+                        if (bucket?.kpi) this.toggleKpiFilter(bucket.kpi);
                     },
-                    datalabels: {
-                        display: (ctx) => ctx.dataset.data[ctx.dataIndex] > 0,
-                        anchor: 'end', align: 'end', offset: 2,
-                        color: isDark ? '#c9d1d9' : '#1f2328',
-                        font: { weight: '700', size: 12, family: "'DM Sans', sans-serif" },
-                        formatter: (v) => v,
-                    }
                 },
-                scales: {
-                    x: { grid: { display: false, drawBorder: false }, ticks: { font: { size: 11 } } },
-                    y: { beginAtZero: true, grid: { color: gridC, drawBorder: false } }
-                }
-            }
-        });
+            },
+            plotOptions: {
+                bar: {
+                    horizontal: false,
+                    borderRadius: 4,
+                    borderRadiusApplication: 'end',
+                    columnWidth: '60%',
+                    distributed: true,
+                },
+            },
+            colors,
+            dataLabels: {
+                enabled: true,
+                offsetY: -20,
+                style: {
+                    fontFamily: "'DM Sans', sans-serif",
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    colors: [t.textPrimary],
+                },
+                formatter: (v) => v > 0 ? v : '',
+            },
+            legend: { show: false },
+            xaxis: {
+                categories,
+                labels: { style: { colors: t.textSecondary, fontSize: '11px' } },
+                axisBorder: { show: false },
+                axisTicks: { show: false },
+            },
+            yaxis: {
+                labels: { style: { colors: t.textSecondary, fontSize: '11px' } },
+                forceNiceScale: true,
+            },
+            tooltip: {
+                ...this.apexCommon().tooltip,
+                custom: ({ dataPointIndex }) => {
+                    const bucket = this.chartCoverageDist?._buckets?.[dataPointIndex] || buckets[dataPointIndex];
+                    const v = counts[dataPointIndex];
+                    const tot = counts.reduce((a, b) => a + b, 0);
+                    const pct = tot ? ((v / tot) * 100).toFixed(1) : 0;
+                    const cum = (this.chartCoverageDist?._cumulative ?? cumulative)[dataPointIndex];
+                    const cumPct = tot ? ((cum / tot) * 100).toFixed(0) : 0;
+                    return `<div class="apex-tt">
+                        <div class="apex-tt-title">${bucket.label}</div>
+                        <div class="apex-tt-line"><span class="apex-tt-k">En este rango</span><span class="apex-tt-v">${v} SKUs (${pct}%)</span></div>
+                        <div class="apex-tt-line"><span class="apex-tt-k">Acumulado</span><span class="apex-tt-v">${cum} SKUs (${cumPct}%)</span></div>
+                        <div class="apex-tt-hint">↳ click to filter by status</div>
+                    </div>`;
+                },
+            },
+            states: {
+                hover: { filter: { type: 'lighten', value: 0.08 } },
+                active: { filter: { type: 'darken', value: 0.15 } },
+            },
+        };
+
+        this.chartCoverageDist = new ApexCharts(el, options);
+        this.chartCoverageDist.render();
         this.chartCoverageDist._cumulative = cumulative;
         this.chartCoverageDist._buckets = buckets;
     }
@@ -1546,7 +1604,6 @@ class FbaAnalyzer {
         const card = document.getElementById('np-histogram-card');
         if (!card) return;
         if (!hasData) {
-            // Si no hay data, limpiamos chart previo y escondemos card
             if (this.chartNpDays) {
                 try { this.chartNpDays.destroy(); } catch (e) {}
                 this.chartNpDays = null;
@@ -1556,96 +1613,111 @@ class FbaAnalyzer {
         }
         card.style.display = '';
 
-        const isDark = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark';
-
-        // Buckets configurables y alineados con el Power BI original
+        const t = this.apexTheme();
         const buckets = [
-            { label: '0–4',   min: 0,   max: 4,   color: isDark ? '#58a6ff' : '#0969da', kind: 'new' },
-            { label: '5–14',  min: 5,   max: 14,  color: isDark ? '#3fb950' : '#1a7f37', kind: 'ok' },
-            { label: '15–30', min: 15,  max: 30,  color: isDark ? '#d29922' : '#9a6700', kind: 'warn' },
-            { label: '31–60', min: 31,  max: 60,  color: isDark ? '#f85149' : '#cf222e', kind: 'bad' },
-            { label: '61–120',min: 61,  max: 120, color: isDark ? '#f85149' : '#cf222e', kind: 'bad' },
-            { label: '120+',  min: 121, max: 99999, color: isDark ? '#ff6b64' : '#a40e26', kind: 'bad' },
+            { label: '0–4',   min: 0,   max: 4,   color: t.palette.accent,    kind: 'new' },
+            { label: '5–14',  min: 5,   max: 14,  color: t.palette.healthy,   kind: 'ok' },
+            { label: '15–30', min: 15,  max: 30,  color: t.palette.low,       kind: 'warn' },
+            { label: '31–60', min: 31,  max: 60,  color: t.palette.oos,       kind: 'bad' },
+            { label: '61–120',min: 61,  max: 120, color: t.palette.oos,       kind: 'bad' },
+            { label: '120+',  min: 121, max: 99999, color: t.isDark ? '#ff6b64' : '#a40e26', kind: 'bad' },
         ];
 
-        // Contar cada SKU not-Prime en su bucket usando notPrimeDays
         const counts = buckets.map(b => notPrimeItems.filter(i => {
             const d = this.notPrimeDays[i.sku];
             if (d == null) return false;
             return d >= b.min && d <= b.max;
         }).length);
+        const categories = buckets.map(b => b.label + ' d');
+        const colors = buckets.map(b => b.color);
 
-        // Update in-place si ya existe
+        // Update in-place
         if (this.chartNpDays) {
-            this.chartNpDays.data.datasets[0].data = counts;
+            this.chartNpDays.updateOptions({
+                series: [{ name: 'SKUs', data: counts }],
+                xaxis: { categories },
+                colors,
+            });
             this.chartNpDays._buckets = buckets;
-            this.chartNpDays.update('none');
             return;
         }
 
-        // Creación inicial: el card recién pasó de display:none a visible.
-        // Chart.js necesita que el browser haya hecho layout para medir bien el canvas.
-        // Doble requestAnimationFrame = espera 2 frames = layout garantizado.
-        const createChart = () => {
-            const ctx = document.getElementById('chart-np-days');
-            if (!ctx) return;
-            const gridC = isDark ? 'rgba(48,54,61,0.3)' : 'rgba(0,0,0,0.06)';
+        const el = document.getElementById('chart-np-days');
+        if (!el) return;
 
-            this.chartNpDays = new Chart(ctx, {
+        const options = {
+            ...this.apexCommon(),
+            series: [{ name: 'SKUs', data: counts }],
+            chart: {
+                ...this.apexCommon().chart,
                 type: 'bar',
-                data: {
-                    labels: buckets.map(b => b.label + ' d'),
-                    datasets: [{
-                        data: counts,
-                        backgroundColor: (c) => this.makeGradient(c, buckets[c.dataIndex]?.color || '#888', 0.85, 0.2),
-                        hoverBackgroundColor: (c) => buckets[c.dataIndex]?.color || '#888',
-                        borderRadius: 6, barPercentage: 0.85, borderWidth: 0,
-                    }]
-                },
-                options: {
-                    responsive: true, maintainAspectRatio: false,
-                    layout: { padding: { top: 18 } },
-                    onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
-                    onClick: (evt, elements) => {
-                        if (!elements.length) return;
-                        const idx = elements[0].index;
-                        const bucket = this.chartNpDays._buckets?.[idx] || buckets[idx];
+                height: 200,
+                events: {
+                    dataPointSelection: (event, ctx, config) => {
+                        const idx = config.dataPointIndex;
+                        if (idx == null) return;
+                        const bucket = this.chartNpDays?._buckets?.[idx] || buckets[idx];
                         const mdInput = document.getElementById('np-filter-mindays');
-                        if (mdInput) {
+                        if (mdInput && bucket) {
                             mdInput.value = bucket.min;
                             this.renderNotPrime();
                         }
                     },
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            padding: 12,
-                            callbacks: {
-                                title: (ctx) => `${ctx[0].label}`,
-                                label: (c) => ` ${c.parsed.y} SKU${c.parsed.y === 1 ? '' : 's'}`,
-                                afterBody: () => ['  ↳ click to filter by min days']
-                            }
-                        },
-                        datalabels: {
-                            display: (ctx) => ctx.dataset.data[ctx.dataIndex] > 0,
-                            anchor: 'end', align: 'end', offset: 2,
-                            color: isDark ? '#c9d1d9' : '#1f2328',
-                            font: { weight: '700', size: 11, family: "'DM Sans', sans-serif" },
-                            formatter: (v) => v,
-                        }
-                    },
-                    scales: {
-                        x: { grid: { display: false, drawBorder: false }, ticks: { font: { size: 10 } } },
-                        y: { beginAtZero: true, grid: { color: gridC, drawBorder: false }, ticks: { precision: 0 } }
-                    }
-                }
-            });
-            this.chartNpDays._buckets = buckets;
+                },
+            },
+            plotOptions: {
+                bar: {
+                    horizontal: false,
+                    borderRadius: 3,
+                    borderRadiusApplication: 'end',
+                    columnWidth: '60%',
+                    distributed: true,
+                },
+            },
+            colors,
+            dataLabels: {
+                enabled: true,
+                offsetY: -18,
+                style: {
+                    fontFamily: "'DM Sans', sans-serif",
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    colors: [t.textPrimary],
+                },
+                formatter: (v) => v > 0 ? v : '',
+            },
+            legend: { show: false },
+            xaxis: {
+                categories,
+                labels: { style: { colors: t.textSecondary, fontSize: '10px' } },
+                axisBorder: { show: false },
+                axisTicks: { show: false },
+            },
+            yaxis: {
+                labels: { style: { colors: t.textSecondary, fontSize: '10px' } },
+                forceNiceScale: true,
+            },
+            tooltip: {
+                ...this.apexCommon().tooltip,
+                custom: ({ dataPointIndex }) => {
+                    const v = counts[dataPointIndex];
+                    const bucket = buckets[dataPointIndex];
+                    return `<div class="apex-tt">
+                        <div class="apex-tt-title">${bucket.label} days</div>
+                        <div class="apex-tt-body">${v} SKU${v === 1 ? '' : 's'}</div>
+                        <div class="apex-tt-hint">↳ click to filter by min days</div>
+                    </div>`;
+                },
+            },
+            states: {
+                hover: { filter: { type: 'lighten', value: 0.08 } },
+                active: { filter: { type: 'darken', value: 0.15 } },
+            },
         };
 
-        // Doble rAF para garantizar que el browser hizo layout del card
-        // después de hacerlo visible. Sin esto, Chart.js mide el canvas a 0x0.
-        requestAnimationFrame(() => requestAnimationFrame(createChart));
+        this.chartNpDays = new ApexCharts(el, options);
+        this.chartNpDays.render();
+        this.chartNpDays._buckets = buckets;
     }
 
     downloadRawJSON() {
@@ -1738,36 +1810,15 @@ class FbaAnalyzer {
         localStorage.setItem('fba-theme', next);
     }
     applyTheme(theme) {
-        console.log(`[FBA Theme] → ${theme}`);
         document.documentElement.setAttribute('data-theme', theme);
         const icon = document.getElementById('theme-icon');
         if (icon) icon.className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
-        const textColor = theme === 'light' ? '#59636e' : '#8b949e';
-        const gridColor = theme === 'light' ? 'rgba(0,0,0,0.06)' : 'rgba(48,54,61,0.5)';
-        Chart.defaults.color = textColor;
-        Chart.defaults.borderColor = gridColor;
 
         if (this.allData?.length > 0) {
-            // Los colores de cada chart están cacheados al crearse → destruir + recrear
+            // ApexCharts puede recrearse limpiamente sin race conditions
             this.destroyAllCharts();
-            console.log('[FBA Theme] charts destroyed, scheduling re-render');
-
-            // UN rAF para dar al browser un tick de CSS recalc. updateDashboard
-            // y renderNotPrime tienen sus propios rAF internos para el chart create.
-            requestAnimationFrame(() => {
-                this.updateDashboard();
-                this.renderNotPrime();
-                // Verificar en consola que los refs se recrearon
-                setTimeout(() => {
-                    console.log('[FBA Theme] chart refs after recreate:', {
-                        health: !!this.chartHealth,
-                        topSellers: !!this.chartTopSellers,
-                        categories: !!this.chartCategories,
-                        coverage: !!this.chartCoverageDist,
-                        npDays: !!this.chartNpDays,
-                    });
-                }, 200);
-            });
+            this.updateDashboard();
+            this.renderNotPrime();
         }
     }
 
