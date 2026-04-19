@@ -227,9 +227,9 @@ section { padding: 28px 0; }
 [data-theme="light"] .kpi-prime .kpi-badge { background: rgba(255,153,0,.08); color: #cc7a00; }
 
 /* ---- CHARTS ---- */
-.chart-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
-.chart-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 14px; }
-.chart-wrap { height: 240px; position: relative; }
+.chart-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 22px 24px; }
+.chart-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 18px; }
+.chart-wrap { height: 280px; position: relative; }
 
 /* ---- FILTER BAR ---- */
 .filter-bar { display: flex; flex-wrap: wrap; gap: 12px; padding: 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; align-items: end; }
@@ -430,7 +430,7 @@ section { padding: 28px 0; }
 
 /* Histogram card below Not Prime table */
 .np-histogram { margin-top: 14px; }
-.chart-wrap-sm { height: 180px; position: relative; }
+.chart-wrap-sm { height: 210px; position: relative; }
 
 /* ============================================================
    Dark mode contrast improvements (v3.4.1)
