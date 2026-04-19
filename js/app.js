@@ -107,6 +107,9 @@ class FbaAnalyzer {
 
         document.getElementById('process-btn')?.addEventListener('click', () => this.runAnalysis());
 
+        // Upload collapse / expand toggle
+        document.getElementById('upload-expand-btn')?.addEventListener('click', () => this.expandUploadSection());
+
         // Dashboard — days selector
         document.querySelectorAll('.day-btn').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -121,6 +124,11 @@ class FbaAnalyzer {
         // KPI click filters
         document.querySelectorAll('.kpi-card.clickable').forEach(card => {
             card.addEventListener('click', () => this.toggleKpiFilter(card.dataset.filter));
+        });
+
+        // Context strip (FBA/Prime text links also behave as filters)
+        document.querySelectorAll('.context-item.clickable-text').forEach(el => {
+            el.addEventListener('click', () => this.toggleKpiFilter(el.dataset.filter));
         });
 
         // Standard filters
@@ -364,8 +372,12 @@ class FbaAnalyzer {
             // Chart.js mide el canvas al momento de crear el chart; si el canvas está en
             // un contenedor display:none, lo mide con 0x0 y el chart queda vacío.
             document.getElementById('kpi-section').style.display = '';
+            document.getElementById('np-section').style.display = '';
             document.getElementById('table-section').style.display = '';
             document.getElementById('export-btn').disabled = false;
+
+            // Colapsar upload section a barra compacta
+            this.collapseUploadSection();
 
             // Un doble requestAnimationFrame garantiza que el browser ya hizo layout
             // de las secciones recién mostradas antes de renderizar los charts.
@@ -1600,12 +1612,39 @@ class FbaAnalyzer {
     setSyncStatus(kind, message) {
         const el = document.getElementById('np-sync-status');
         if (!el) return;
-        el.className = 'np-sync-status';
+        el.className = 'np-status-bar'; // nueva clase standalone (era np-sync-status dentro de .np-hint)
         if (kind === 'ok') el.classList.add('sync-ok');
         else if (kind === 'err') el.classList.add('sync-err');
         else if (kind === 'off') el.classList.add('sync-off');
         const icon = { ok: 'fa-cloud-arrow-up', err: 'fa-triangle-exclamation', off: 'fa-cloud-xmark', loading: 'fa-circle-notch fa-spin' }[kind] || 'fa-info-circle';
         el.innerHTML = `<i class="fas ${icon} me-1"></i>${message}`;
+    }
+
+    // ---- Upload collapse/expand ----
+    collapseUploadSection() {
+        const full = document.getElementById('upload-section');
+        const bar = document.getElementById('upload-collapsed');
+        if (!full || !bar) return;
+        full.style.display = 'none';
+        bar.style.display = '';
+        // Poblar resumen con los nombres de archivos subidos
+        const names = [];
+        ['amazon', 'cin7', 'stylish'].forEach(type => {
+            if (this.files[type]?.name) names.push(this.files[type].name);
+        });
+        const text = document.getElementById('upload-collapsed-text');
+        const time = document.getElementById('upload-collapsed-time');
+        if (text) text.textContent = names.length ? names.join(' · ') : 'Files loaded';
+        if (time) time.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    expandUploadSection() {
+        const full = document.getElementById('upload-section');
+        const bar = document.getElementById('upload-collapsed');
+        if (!full || !bar) return;
+        full.style.display = '';
+        bar.style.display = 'none';
+        full.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     // ===============================================================
@@ -1614,6 +1653,7 @@ class FbaAnalyzer {
     renderNpDaysChart(notPrimeItems) {
         const hasData = notPrimeItems.length > 0 && Object.keys(this.notPrimeDays).length > 0;
         const card = document.getElementById('np-histogram-card');
+        const emptyCard = document.getElementById('np-empty-card');
         if (!card) return;
         if (!hasData) {
             if (this.chartNpDays) {
@@ -1621,9 +1661,11 @@ class FbaAnalyzer {
                 this.chartNpDays = null;
             }
             card.style.display = 'none';
+            if (emptyCard) emptyCard.style.display = '';
             return;
         }
         card.style.display = '';
+        if (emptyCard) emptyCard.style.display = 'none';
 
         const t = this.apexTheme();
         const buckets = [
