@@ -1410,7 +1410,13 @@ class FbaAnalyzer {
                 <td class="text-end value-mono ${item.qty_to_send > 0 ? 'value-danger' : 'value-muted'}">${this.fmtNum(item.qty_to_send)}</td>
                 <td><span class="badge-sm ${methodClass}">${item.how_to_send}</span></td>
                 <td class="text-end value-mono">${item.qty_pallets || '—'}</td>
-                <td>${item.eta ? '<span class="badge-sm badge-inbound"><i class="fas fa-plane-arrival me-1"></i>' + this.esc(item.eta) + '</span>' : '<span class="value-muted">—</span>'}</td>
+                <td>${
+                    item.inventory_amazon_inbound > 0
+                        ? `<span class="badge-sm badge-inbound"><i class="fas fa-plane-arrival me-1"></i>${this.fmtNum(item.inventory_amazon_inbound)} units</span>${item.eta ? `<div class="inbound-eta">ETA ${this.esc(item.eta)}</div>` : ''}`
+                        : (item.eta
+                            ? `<span class="badge-sm badge-inbound-eta" title="Stylish ETA only, no units shipped to Amazon yet"><i class="far fa-calendar me-1"></i>${this.esc(item.eta)}</span>`
+                            : '<span class="value-muted">—</span>')
+                }</td>
             </tr>`;
         });
         tbody.innerHTML = html;
@@ -1420,8 +1426,8 @@ class FbaAnalyzer {
     exportCSV() {
         if (!this.filteredData.length) return;
         const wh = this.isAmazonUSA ? 'Inventory Charlotte' : 'Inventory Cambridge';
-        const headers = ['SKU','FBA','Category','Units Sold 30d',`Target ${this.selectedDays}d`,'Inventory Amazon (Total)','Inventory Amazon (Available)','Coverage Days','Pack Density',wh,'Stylish Inventory','Qty to Send','Method','Pallets','Inbound ETA'];
-        const keys = ['sku','fba','category','units_sold','target','inventory_amazon','inventory_amazon_available','coverage_days','pack_density','inventory_warehouse','inventory_stylish','qty_to_send','how_to_send','qty_pallets','eta'];
+        const headers = ['SKU','FBA','Category','Units Sold 30d',`Target ${this.selectedDays}d`,'Inventory Amazon (Total)','Inventory Amazon (Available)','Coverage Days','Pack Density',wh,'Stylish Inventory','Qty to Send','Method','Pallets','Inbound Units','Stylish ETA'];
+        const keys = ['sku','fba','category','units_sold','target','inventory_amazon','inventory_amazon_available','coverage_days','pack_density','inventory_warehouse','inventory_stylish','qty_to_send','how_to_send','qty_pallets','inventory_amazon_inbound','eta'];
         const csvCell = v => { const s = String(v ?? ''); return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s; };
         const rows = [headers.join(',')];
         this.filteredData.forEach(i => rows.push(keys.map(k => csvCell(i[k])).join(',')));
