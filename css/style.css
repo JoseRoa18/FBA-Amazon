@@ -805,3 +805,23 @@ section { padding: 28px 0; }
 [data-theme="light"] .table-section .filter-bar {
     background: var(--bg-body, #f6f8fa);
 }
+
+/* Inbound column: units as main badge + ETA as subtext */
+.badge-inbound {
+    font-family: var(--mono, 'JetBrains Mono', monospace);
+    font-weight: 600;
+}
+.badge-inbound-eta {
+    background: transparent !important;
+    border: 1px dashed var(--border);
+    color: var(--text-secondary);
+    font-size: 11px;
+    opacity: 0.85;
+}
+.inbound-eta {
+    font-family: var(--mono, 'JetBrains Mono', monospace);
+    font-size: 10.5px;
+    color: var(--text-muted);
+    margin-top: 3px;
+    letter-spacing: 0.02em;
+}
