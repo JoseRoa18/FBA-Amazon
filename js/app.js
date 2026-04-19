@@ -505,13 +505,17 @@ class FbaAnalyzer {
         if (!colTotalUnit) colTotalUnit = FbaAnalyzer.detectCol(amzHeaders, ['Inventory at Amazon', 'FBA sellable']);
         let colAvailable = FbaAnalyzer.detectColStrict(amzHeaders, ['Available', 'available']);
         if (!colAvailable) colAvailable = FbaAnalyzer.detectCol(amzHeaders, ['afn-fulfillable-quantity', 'Inv - Available', 'Available Units', 'Fulfillable Quantity', 'afn fulfillable quantity']);
+        // Inbound = unidades en tránsito al almacén de Amazon (columna N del restock report)
+        let colInbound = FbaAnalyzer.detectColStrict(amzHeaders, ['Inbound', 'inbound']);
+        if (!colInbound) colInbound = FbaAnalyzer.detectCol(amzHeaders, ['afn-inbound-shipped-quantity', 'Inbound quantity', 'Inbound Units', 'inbound_shipped_quantity']);
+        if (!colInbound && amzHeaders[13]) colInbound = amzHeaders[13]; // fallback: 14ta columna (index 13)
         if (!colSold30 && amzHeaders[11]) colSold30 = amzHeaders[11];
         if (!colTotalUnit && amzHeaders[12]) colTotalUnit = amzHeaders[12];
         if (!colMerchantSKU && !colSupplier) throw new Error("Amazon: no se encontró 'Merchant SKU' ni 'Supplier'.");
         if (!colSold30) throw new Error("Amazon: no se encontró columna Units Sold 30d.");
         if (!colTotalUnit) throw new Error("Amazon: no se encontró columna Total Units.");
 
-        const amzUnitsSold = {}, amzInventory = {}, amzAvailable = {};
+        const amzUnitsSold = {}, amzInventory = {}, amzAvailable = {}, amzInbound = {};
         const skusInAmazonFile = new Set();
         const unmappedSkus = new Set();
 
@@ -533,6 +537,9 @@ class FbaAnalyzer {
             amzUnitsSold[partNumber] = (amzUnitsSold[partNumber] || 0) + FbaAnalyzer.toInt(r[colSold30]);
             amzInventory[partNumber] = (amzInventory[partNumber] || 0) + FbaAnalyzer.toInt(r[colTotalUnit]);
             amzAvailable[partNumber] = (amzAvailable[partNumber] || 0) + FbaAnalyzer.toInt(r[colAvailable || colTotalUnit]);
+            if (colInbound) {
+                amzInbound[partNumber] = (amzInbound[partNumber] || 0) + FbaAnalyzer.toInt(r[colInbound]);
+            }
         }
 
         // Step 5: CIN7
@@ -593,6 +600,7 @@ class FbaAnalyzer {
                 units_sold: unitsSold,
                 inventory_amazon: invAmazon,
                 inventory_amazon_available: amzAvailable[sku] || 0,
+                inventory_amazon_inbound: amzInbound[sku] || 0,
                 pack_density: master[sku]?.pack_density || 0,
                 inventory_warehouse: cin7WH[sku] || 0,
                 inventory_stylish: stylishQty[sku] || 0,
@@ -640,6 +648,7 @@ class FbaAnalyzer {
             units_sold: Number(item.units_sold ?? 0),
             inventory_amazon: Number(item.inventory_amazon ?? 0),
             inventory_amazon_available: Number(item.inventory_amazon_available ?? 0),
+            inventory_amazon_inbound: Number(item.inventory_amazon_inbound ?? 0),
             pack_density: Number(item.pack_density ?? 0),
             inventory_warehouse: Number(item.inventory_warehouse ?? 0),
             inventory_stylish: Number(item.inventory_stylish ?? 0),
@@ -719,7 +728,7 @@ class FbaAnalyzer {
             if (kpi === 'low') return item.inventory_amazon > 0 && item.coverage_days < 30;
             if (kpi === 'healthy') return item.coverage_days >= 30 && item.coverage_days <= 120;
             if (kpi === 'tosend') return item.qty_to_send > 0;
-            if (kpi === 'inbound') return item.eta !== '';
+            if (kpi === 'inbound') return item.inventory_amazon_inbound > 0;
             if (kpi === 'nowarehouse') return item.inventory_stylish === 0;
             if (kpi === 'overstock') return item.coverage_days > 120;
             if (kpi === 'infba') return item.inventory_amazon > 0;
@@ -765,7 +774,7 @@ class FbaAnalyzer {
             else if (cls === 'overstock') overstock++;
             else healthy++;
             totalSend += item.qty_to_send;
-            if (item.eta !== '') inbound++;
+            if (item.inventory_amazon_inbound > 0) inbound++;
             if (item.inventory_stylish === 0) noWarehouse++;
             if (item.inventory_amazon > 0) inFba++;
             if (item.inventory_amazon_available > 0) inPrime++;
