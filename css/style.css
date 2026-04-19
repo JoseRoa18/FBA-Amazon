@@ -579,3 +579,229 @@ section { padding: 28px 0; }
 
 /* Menu dropdown (three-dot menu) — oculto porque ya tenemos toolbar: false */
 .apexcharts-menu { display: none !important; }
+
+/* ============================================================
+   Layout overhaul (v4.2) — cleaner distribution
+   ============================================================ */
+
+/* Section headers — smaller, tighter */
+.section-header h2 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+.section-header h2 i {
+    font-size: 18px;
+}
+
+.section-subtitle {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-secondary);
+    margin-left: 10px;
+    letter-spacing: normal;
+    text-transform: none;
+}
+
+/* ---- Upload collapsed bar (shown after Run Analysis) ---- */
+.upload-collapsed {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 0;
+}
+.upload-collapsed-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+.upload-collapsed-info {
+    display: flex;
+    align-items: center;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+.upload-collapsed-info i {
+    color: var(--success, #3fb950);
+    font-size: 14px;
+}
+.upload-collapsed-time {
+    font-family: var(--mono, 'JetBrains Mono', monospace);
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: 12px;
+    padding-left: 12px;
+    border-left: 1px solid var(--border);
+}
+.btn-clear-ghost {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 12px;
+    padding: 5px 12px;
+}
+.btn-clear-ghost:hover {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+/* ---- KPI rows — flat grid, symmetric ---- */
+.kpi-row {
+    display: grid;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+/* Row 1: 5 columns */
+.kpi-row:not(.kpi-row-action) {
+    grid-template-columns: repeat(5, 1fr);
+}
+/* Row 2 (action): 3 columns */
+.kpi-row-action {
+    grid-template-columns: repeat(3, 1fr);
+    max-width: 66%;
+}
+@media (max-width: 1100px) {
+    .kpi-row:not(.kpi-row-action) { grid-template-columns: repeat(3, 1fr); }
+    .kpi-row-action { grid-template-columns: repeat(3, 1fr); max-width: 100%; }
+}
+@media (max-width: 640px) {
+    .kpi-row:not(.kpi-row-action) { grid-template-columns: repeat(2, 1fr); }
+    .kpi-row-action { grid-template-columns: repeat(1, 1fr); }
+}
+
+/* KPI cards — more compact */
+.kpi-card {
+    padding: 12px 14px;
+    min-height: auto;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.kpi-icon {
+    width: 34px; height: 34px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+.kpi-body { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.kpi-value { font-size: 20px; font-weight: 700; line-height: 1.1; }
+.kpi-label { font-size: 11px; color: var(--text-secondary); line-height: 1.25; }
+
+/* Hide old badges now that tooltips provide the context */
+.kpi-badge { display: none !important; }
+
+/* ---- Context strip (FBA + Prime as inline text) ---- */
+.context-strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    flex-wrap: wrap;
+}
+.context-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    transition: var(--transition);
+}
+.context-item:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.context-item strong {
+    color: var(--text-primary);
+    font-weight: 700;
+    font-family: var(--mono, 'JetBrains Mono', monospace);
+    font-size: 13px;
+}
+.context-item i { font-size: 12px; opacity: 0.75; }
+.context-item.active-filter {
+    background: var(--accent-bg, rgba(88,166,255,0.15));
+    color: var(--accent, #58a6ff);
+}
+.context-item.active-filter strong { color: var(--accent, #58a6ff); }
+.context-sep { color: var(--text-muted); font-weight: 300; }
+
+/* ---- Not Prime section — now full-width, priority ---- */
+.np-section {
+    padding: 22px 0;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    margin: 20px 0;
+}
+
+.np-section .section-header h2 {
+    color: var(--text-primary);
+}
+
+.np-status-bar {
+    font-size: 11px;
+    font-family: var(--mono, 'JetBrains Mono', monospace);
+    margin: -8px 0 14px;
+    min-height: 16px;
+}
+.np-status-bar.sync-ok { color: var(--success, #3fb950); }
+.np-status-bar.sync-err { color: var(--danger, #f85149); }
+.np-status-bar.sync-off { color: var(--text-muted); }
+
+.np-table-wrapper { max-height: 420px; overflow: auto; }
+
+.np-empty {
+    text-align: center;
+    padding: 40px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 250px;
+}
+.np-empty-state i {
+    font-size: 44px;
+    color: var(--success, #3fb950);
+    opacity: 0.75;
+    margin-bottom: 14px;
+}
+.np-empty-state p {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 4px;
+}
+.np-empty-state small {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* Hide empty card when histogram is visible */
+#np-histogram-card:not([style*="display:none"]) + #np-empty-card,
+.np-section #np-histogram-card[style*="display:none"] ~ #np-empty-card {
+    /* keep visible as fallback when histogram hidden */
+}
+
+/* Section spacing normalization */
+.kpi-section, .table-section, .np-section {
+    padding-top: 24px;
+    padding-bottom: 24px;
+}
+
+/* Override old column-based NP hint behavior (class no longer used on new layout) */
+.np-hint { display: none; }
+
+/* Sticky filter bar on Detail View for long scrolls */
+.table-section .filter-bar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--bg-body, #0d1117);
+}
+[data-theme="light"] .table-section .filter-bar {
+    background: var(--bg-body, #f6f8fa);
+}
