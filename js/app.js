@@ -27,6 +27,10 @@ class FbaAnalyzer {
         // Marketplace
         this.isAmazonUSA = false;
 
+        // Origen de la data mostrada: null (nada), 'snapshot' (restaurada
+        // de Supabase) o 'live' (análisis corrido en esta sesión).
+        this.dataSource = null;
+
         // Charts
         this.chartHealth = null;
         this.chartTopSellers = null;
@@ -170,6 +174,10 @@ class FbaAnalyzer {
 
         // Cargar config bundleada
         await this.loadConfig();
+
+        // Si todavía no se subieron archivos, mostrar el último análisis
+        // guardado en Supabase (si existe) para no arrancar con la app vacía.
+        this.loadLatestSnapshot();
     }
 
     // ===============================================================
@@ -363,29 +371,13 @@ class FbaAnalyzer {
 
             // Dashboard
             log('[Dashboard]', 'label');
-            this.allData = result.data.map(r => this.normalizeForDashboard(r));
-            this.recalculate(false);
-            this.filteredData = [...this.allData];
-            this.extractCategories();
-
-            // IMPORTANTE: mostrar las secciones ANTES de renderizar los charts.
-            // Chart.js mide el canvas al momento de crear el chart; si el canvas está en
-            // un contenedor display:none, lo mide con 0x0 y el chart queda vacío.
-            document.getElementById('kpi-section').style.display = '';
-            document.getElementById('np-section').style.display = '';
-            document.getElementById('table-section').style.display = '';
-            document.getElementById('export-btn').disabled = false;
+            this.dataSource = 'live';
+            this.hideSnapshotBanner();
 
             // Colapsar upload section a barra compacta
             this.collapseUploadSection();
 
-            // Un doble requestAnimationFrame garantiza que el browser ya hizo layout
-            // de las secciones recién mostradas antes de renderizar los charts.
-            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-            this.render();
-            this.renderNotPrime();
-            this.updateDashboard();
+            await this.showDashboard();
             log(`  ✓ ${this.allData.length} SKUs renderizados`, 'ok');
             log('');
 
@@ -433,6 +425,147 @@ class FbaAnalyzer {
             document.getElementById('debug-output').innerHTML = dbg.join('\n');
             this.hideModal();
         }
+    }
+
+    // ===============================================================
+    // SHOW DASHBOARD — construye allData desde processedData y
+    // renderiza KPIs, tabla y charts. Usado tanto por runAnalysis()
+    // como por la restauración del último snapshot.
+    // ===============================================================
+    async showDashboard() {
+        this.allData = this.processedData.map(r => this.normalizeForDashboard(r));
+        this.recalculate(false);
+        this.filteredData = [...this.allData];
+        this.extractCategories();
+
+        // IMPORTANTE: mostrar las secciones ANTES de renderizar los charts.
+        // Los charts miden su contenedor al crearse; si está en display:none,
+        // lo miden con 0x0 y quedan vacíos.
+        document.getElementById('kpi-section').style.display = '';
+        document.getElementById('np-section').style.display = '';
+        document.getElementById('table-section').style.display = '';
+        document.getElementById('export-btn').disabled = false;
+
+        // Un doble requestAnimationFrame garantiza que el browser ya hizo layout
+        // de las secciones recién mostradas antes de renderizar los charts.
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+        this.render();
+        this.renderNotPrime();
+        this.updateDashboard();
+    }
+
+    // ===============================================================
+    // SNAPSHOT RESTORE — al abrir la app sin subir archivos, carga el
+    // último análisis guardado en Supabase para el marketplace actual.
+    // Read-only: no toca tracking ni guarda snapshots nuevos.
+    // ===============================================================
+    async loadLatestSnapshot() {
+        if (!this.supabase) return false;
+        // Nunca pisar un análisis fresco corrido en esta sesión.
+        if (this.dataSource === 'live') return false;
+
+        const mp = this.isAmazonUSA ? 'usa' : 'ca';
+        try {
+            const { data: snap, error } = await this.supabase
+                .from('snapshots')
+                .select('id, taken_at, days_target, data')
+                .eq('marketplace', mp)
+                .order('taken_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            if (error) throw new Error(error.message);
+
+            // Re-chequear después del await: si mientras tanto el usuario corrió
+            // un análisis real, no pisarlo con el snapshot.
+            if (this.dataSource === 'live') return false;
+
+            if (!snap || !Array.isArray(snap.data) || snap.data.length === 0) {
+                // No hay snapshot para este marketplace: si estábamos mostrando
+                // uno de otro marketplace, ocultar el dashboard para no mostrar
+                // data que no corresponde.
+                if (this.dataSource === 'snapshot') {
+                    this.dataSource = null;
+                    this.hideSnapshotBanner();
+                    document.getElementById('kpi-section').style.display = 'none';
+                    document.getElementById('np-section').style.display = 'none';
+                    document.getElementById('table-section').style.display = 'none';
+                }
+                console.log(`[FBA] Sin snapshots guardados para ${mp.toUpperCase()}.`);
+                return false;
+            }
+
+            this.processedData = snap.data;
+            this.processedMeta = {
+                marketplace: mp,
+                restored_from_snapshot: snap.id,
+                generated_at: snap.taken_at,
+            };
+            if (snap.days_target) this.setSelectedDays(snap.days_target);
+
+            // Días sin Prime: lectura directa del tracking (sin reconciliar,
+            // eso solo pasa cuando se corre un análisis real).
+            await this.loadNotPrimeDays(mp);
+
+            await this.showDashboard();
+            this.dataSource = 'snapshot';
+            this.showSnapshotBanner(snap.taken_at);
+            this.setSyncStatus('ok', 'Loaded from history · run analysis to refresh');
+
+            console.log(`%c[FBA] Snapshot restaurado (${mp.toUpperCase()}, ${snap.taken_at})`, 'color:#3fb950;font-weight:bold');
+            return true;
+        } catch (err) {
+            console.warn('[FBA] No se pudo restaurar el último snapshot:', err.message);
+            return false;
+        }
+    }
+
+    // Lee not_prime_tracking y computa days client-side a partir de
+    // first_unavailable (mismo criterio que la función reconcile_not_prime).
+    async loadNotPrimeDays(mp) {
+        this.notPrimeDays = {};
+        try {
+            const { data, error } = await this.supabase
+                .from('not_prime_tracking')
+                .select('sku, first_unavailable')
+                .eq('marketplace', mp);
+            if (error) throw new Error(error.message);
+            const MS_DAY = 86400000;
+            (data || []).forEach(row => {
+                if (!row.sku || !row.first_unavailable) return;
+                const days = Math.floor((Date.now() - new Date(row.first_unavailable).getTime()) / MS_DAY);
+                this.notPrimeDays[row.sku] = Math.max(0, days);
+            });
+        } catch (err) {
+            console.warn('[FBA] No se pudo leer not_prime_tracking:', err.message);
+        }
+    }
+
+    // Sincroniza selectedDays con los botones del selector (45/60/90).
+    setSelectedDays(days) {
+        this.selectedDays = days;
+        document.querySelectorAll('.day-btn').forEach(b => {
+            b.classList.toggle('active', parseInt(b.dataset.days) === days);
+        });
+        const th = document.getElementById('th-target');
+        if (th) th.textContent = `Target ${days}d`;
+    }
+
+    showSnapshotBanner(takenAt) {
+        const banner = document.getElementById('snapshot-banner');
+        const text = document.getElementById('snapshot-banner-text');
+        if (!banner || !text) return;
+        const when = new Date(takenAt).toLocaleString(undefined, {
+            year: 'numeric', month: 'short', day: 'numeric',
+            hour: '2-digit', minute: '2-digit',
+        });
+        text.textContent = `Showing last saved analysis (${when}). Upload the three reports and run a new analysis to refresh.`;
+        banner.style.display = '';
+    }
+
+    hideSnapshotBanner() {
+        const banner = document.getElementById('snapshot-banner');
+        if (banner) banner.style.display = 'none';
     }
 
     // ===============================================================
@@ -1898,6 +2031,10 @@ class FbaAnalyzer {
     handleMarketplaceChange(e) {
         this.isAmazonUSA = e.target.checked;
         this.updateMarketplaceUI();
+        // Si lo que se está mostrando vino de un snapshot (no de un análisis
+        // corrido en esta sesión), cargar el último snapshot del marketplace
+        // recién seleccionado.
+        if (this.dataSource !== 'live') this.loadLatestSnapshot();
     }
     updateMarketplaceUI() {
         const labelCA = document.getElementById('mp-label-ca');
