@@ -265,7 +265,10 @@ class FbaAnalyzer {
 
     checkProcessBtn() {
         const btn = document.getElementById('process-btn');
-        if (btn) btn.disabled = !(this.files.amazon && this.files.cin7 && this.files.stylish);
+        if (!btn) return;
+        // USA solo requiere 2 archivos (Amazon + inventario); CA también requiere Stylish.
+        const stylishOk = this.isAmazonUSA || !!this.files.stylish;
+        btn.disabled = !(this.files.amazon && this.files.cin7 && stylishOk);
     }
 
     async parseUploadedFile(file, opts = {}) {
@@ -330,7 +333,7 @@ class FbaAnalyzer {
     // RUN ANALYSIS — orquesta Partes 1 + 2 + 3
     // ===============================================================
     async runAnalysis() {
-        if (!this.files.amazon || !this.files.cin7 || !this.files.stylish) return;
+        if (!this.files.amazon || !this.files.cin7 || (!this.isAmazonUSA && !this.files.stylish)) return;
         if (!this.config.info) {
             alert('La config todavía no terminó de cargar. Espera un segundo y vuelve a intentar.');
             return;
@@ -356,7 +359,11 @@ class FbaAnalyzer {
             const cin7 = await this.parseUploadedFile(this.files.cin7);
             this.parsed.cin7 = cin7;
             log(`  CIN7:   ${cin7.rows.length} filas · ${cin7.headers.length} columnas`, 'ok');
-            const stylish = await this.parseUploadedFile(this.files.stylish, { detectStylish: true });
+            // USA no usa archivo Stylish: dejamos parsed.stylish vacío (sin tránsito/ETA).
+            let stylish = { headers: [], rows: [], raw: [] };
+            if (!this.isAmazonUSA && this.files.stylish) {
+                stylish = await this.parseUploadedFile(this.files.stylish, { detectStylish: true });
+            }
             this.parsed.stylish = stylish;
             log(`  Stylish: ${stylish.rows.length} filas · ${stylish.headers.length} columnas`, 'ok');
             log('');
@@ -605,6 +612,9 @@ class FbaAnalyzer {
         }
 
         // Step 3: SKU mapping
+        // CA: el Merchant SKU de Amazon (ej. P-205-CAN) se traduce a Part # vía can-sku.csv.
+        // USA: los SKU vienen tal cual (sin sufijo -USA), así que el Merchant SKU se usa
+        //      directo como part number en el Step 4 — no se necesita archivo de mapeo.
         const skuMapping = {};
         if (marketplace === 'ca') {
             const sample = this.config.skuMapCA[0] || {};
@@ -616,15 +626,6 @@ class FbaAnalyzer {
                     const part = FbaAnalyzer.normalizeSku(row[partKey]);
                     if (msku && part) skuMapping[msku] = part;
                 }
-            }
-        } else {
-            for (let i = 1; i < this.config.skuMapUSA.length; i++) {
-                const row = this.config.skuMapUSA[i] || [];
-                const rawPart = String(row[2] ?? '');
-                if (rawPart.startsWith('=')) continue;
-                const msku = FbaAnalyzer.normalizeSku(row[1]);
-                const part = FbaAnalyzer.normalizeSku(rawPart);
-                if (msku && part) skuMapping[msku] = part;
             }
         }
 
@@ -656,7 +657,11 @@ class FbaAnalyzer {
             let partNumber = '';
             if (colMerchantSKU) {
                 const msku = FbaAnalyzer.normalizeSku(r[colMerchantSKU]);
-                if (msku && skuMapping[msku]) partNumber = skuMapping[msku];
+                // USA: SKU directo (identidad). CA: traducir vía mapping.
+                if (msku) {
+                    if (marketplace === 'usa') partNumber = msku;
+                    else if (skuMapping[msku]) partNumber = skuMapping[msku];
+                }
             }
             if (!partNumber && colSupplier) {
                 const sup = FbaAnalyzer.normalizeSku(r[colSupplier]);
@@ -684,7 +689,7 @@ class FbaAnalyzer {
         if (!colOnHand) throw new Error("CIN7: no se encontró columna OnHand.");
         if (!colLoc) throw new Error("CIN7: no se encontró columna Location.");
 
-        const locationFilter = marketplace === 'usa' ? 'charlotte' : 'cambridge';
+        const locationFilter = marketplace === 'usa' ? 'flowery branch' : 'cambridge';
         const cin7WH = {};
         for (const r of this.parsed.cin7.rows) {
             const sku = FbaAnalyzer.normalizeSku(r[colSkuCin7]);
@@ -1539,7 +1544,7 @@ class FbaAnalyzer {
                 <td class="text-end"><span class="coverage-bar"><span class="bar"><span class="bar-fill" style="width:${covPct}%;background:${covColor}"></span></span><span class="value-mono" style="color:${covColor}">${covLabel}</span></span></td>
                 <td class="text-end value-mono ${item.pack_density === 0 ? 'value-muted' : ''}">${item.pack_density || '—'}</td>
                 <td class="text-end value-mono">${this.fmtNum(item.inventory_warehouse)}</td>
-                <td class="text-end value-mono ${item.inventory_stylish === 0 ? 'value-muted' : ''}">${this.fmtNum(item.inventory_stylish)}</td>
+                <td class="text-end value-mono col-stylish ${item.inventory_stylish === 0 ? 'value-muted' : ''}">${this.fmtNum(item.inventory_stylish)}</td>
                 <td class="text-end value-mono ${item.qty_to_send > 0 ? 'value-danger' : 'value-muted'}">${this.fmtNum(item.qty_to_send)}</td>
                 <td><span class="badge-sm ${methodClass}">${item.how_to_send}</span></td>
                 <td class="text-end value-mono">${item.qty_pallets || '—'}</td>
@@ -1558,7 +1563,7 @@ class FbaAnalyzer {
     // ---- EXPORT ----
     exportCSV() {
         if (!this.filteredData.length) return;
-        const wh = this.isAmazonUSA ? 'Inventory Charlotte' : 'Inventory Cambridge';
+        const wh = this.isAmazonUSA ? 'Inventory Flowery Branch' : 'Inventory Cambridge';
         const headers = ['SKU','FBA','Category','Units Sold 30d',`Target ${this.selectedDays}d`,'Inventory Amazon (Total)','Inventory Amazon (Available)','Coverage Days','Pack Density',wh,'Stylish Inventory','Qty to Send','Method','Pallets','Inbound Units','Stylish ETA'];
         const keys = ['sku','fba','category','units_sold','target','inventory_amazon','inventory_amazon_available','coverage_days','pack_density','inventory_warehouse','inventory_stylish','qty_to_send','how_to_send','qty_pallets','inventory_amazon_inbound','eta'];
         const csvCell = v => { const s = String(v ?? ''); return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -1667,7 +1672,7 @@ class FbaAnalyzer {
     exportNotPrime() {
         const data = this._notPrimeFiltered || this.computeNotPrime();
         if (!data.length) return;
-        const wh = this.isAmazonUSA ? 'Inventory Charlotte' : 'Inventory Cambridge';
+        const wh = this.isAmazonUSA ? 'Inventory Flowery Branch' : 'Inventory Cambridge';
         const headers = ['SKU','Category','FBA Total Units','Available for Prime','Days Unavailable','Units Sold 30d',wh,'Stylish Inventory','Inbound ETA'];
         const keys = ['sku','category','inventory_amazon','inventory_amazon_available','days_unavailable','units_sold','inventory_warehouse','inventory_stylish','eta'];
         const csvCell = v => { const s = String(v ?? ''); return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -2040,14 +2045,35 @@ class FbaAnalyzer {
         if (this.dataSource !== 'live') this.loadLatestSnapshot();
     }
     updateMarketplaceUI() {
+        const usa = this.isAmazonUSA;
         const labelCA = document.getElementById('mp-label-ca');
         const labelUS = document.getElementById('mp-label-us');
         const title = document.getElementById('amazon-report-title');
         const thWH = document.getElementById('th-warehouse');
-        if (labelCA) labelCA.classList.toggle('active', !this.isAmazonUSA);
-        if (labelUS) labelUS.classList.toggle('active', this.isAmazonUSA);
-        if (title) title.textContent = this.isAmazonUSA ? 'Amazon USA Restock' : 'Amazon CA Restock';
-        if (thWH) thWH.textContent = this.isAmazonUSA ? 'Warehouse (Charlotte)' : 'Warehouse (Cambridge)';
+        if (labelCA) labelCA.classList.toggle('active', !usa);
+        if (labelUS) labelUS.classList.toggle('active', usa);
+        if (title) title.textContent = usa ? 'Amazon USA Restock' : 'Amazon CA Restock';
+        if (thWH) thWH.textContent = usa ? 'Warehouse (Flowery Branch)' : 'Warehouse (Cambridge)';
+
+        // USA usa solo 2 archivos: ocultar la tarjeta de Stylish y ajustar textos.
+        const stylishCol = document.getElementById('stylish-col');
+        if (stylishCol) stylishCol.classList.toggle('d-none', usa);
+        const cin7Title = document.getElementById('cin7-report-title');
+        if (cin7Title) cin7Title.textContent = usa ? 'Inventory ATL' : 'CIN7 Inventory';
+        const uploadHint = document.getElementById('upload-files-hint');
+        if (uploadHint) uploadHint.textContent = usa
+            ? 'Drop your two source files to begin analysis'
+            : 'Drop your three source files to begin analysis';
+
+        // USA no usa Stylish: ocultar la columna "Stylish inv." de la tabla y el
+        // KPI "No warehouse stock" (que se basa en ese mismo dato).
+        const table = document.getElementById('results-table');
+        if (table) table.classList.toggle('hide-stylish', usa);
+        const cardNoWh = document.getElementById('card-nowarehouse');
+        if (cardNoWh) cardNoWh.classList.toggle('d-none', usa);
+
+        // El requisito de archivos cambió según marketplace: re-evaluar el botón.
+        this.checkProcessBtn();
     }
 
     showStatus(type, msg) {

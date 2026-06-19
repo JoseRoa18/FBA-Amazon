@@ -14,7 +14,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="js/config.js"></script>
 
-    <link rel="stylesheet" href="css/style.css?v=4.5">
+    <link rel="stylesheet" href="css/style.css?v=4.7">
 </head>
 <body>
 
@@ -55,7 +55,7 @@
     <div class="container-fluid px-4">
         <div class="section-header">
             <h2><i class="fas fa-cloud-arrow-up me-2"></i>Upload reports</h2>
-            <p class="text-secondary">Drop your three source files to begin analysis</p>
+            <p class="text-secondary" id="upload-files-hint">Drop your three source files to begin analysis</p>
         </div>
         <div class="row g-3">
             <div class="col-md-4">
@@ -70,13 +70,13 @@
             <div class="col-md-4">
                 <div class="upload-card" id="cin7-upload">
                     <div class="upload-icon cin7"><i class="fas fa-database"></i></div>
-                    <h6>CIN7 Inventory</h6>
+                    <h6 id="cin7-report-title">CIN7 Inventory</h6>
                     <small class="upload-hint">CSV</small>
                     <div class="upload-status" id="cin7-status"></div>
                     <input type="file" class="d-none" accept=".xlsx,.xls,.csv" id="cin7-file">
                 </div>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-4" id="stylish-col">
                 <div class="upload-card" id="stylish-upload">
                     <div class="upload-icon stylish"><i class="fas fa-chart-line"></i></div>
                     <h6>Stylish Inventory</h6>
@@ -388,7 +388,7 @@
                         <th class="text-end">Coverage</th>
                         <th class="text-end">Pack density</th>
                         <th class="text-end" id="th-warehouse">Warehouse (CIN7)</th>
-                        <th class="text-end">Stylish inv.</th>
+                        <th class="text-end col-stylish">Stylish inv.</th>
                         <th class="text-end">Qty to send</th>
                         <th>Method</th>
                         <th class="text-end">Pallets</th>
@@ -442,6 +442,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script src="js/app.js?v=4.6" defer></script>
+<script src="js/app.js?v=4.7" defer></script>
 </body>
 </html>
