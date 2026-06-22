@@ -1,4 +1,4 @@
-# FBA Analyzer v4.9
+# FBA Analyzer v5.0
 
 App 100% estática para análisis de inventario FBA. Todo el procesamiento corre en el browser; Supabase guarda el tracking histórico y snapshots.
 

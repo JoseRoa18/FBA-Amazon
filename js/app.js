@@ -1590,15 +1590,15 @@ class FbaAnalyzer {
     }
 
     // ===============================================================
-    // NOT IN PRIME — productos FBA NO disponibles para Prime (available === 0,
-    // siendo "available" la columna Available del archivo de Amazon).
-    // Incluye tanto inventario varado (total_units > 0) como productos FBA
-    // agotados (total_units === 0), para que sigan trackeando sus días sin Prime.
+    // NOT IN PRIME — productos FBA = YES cuya columna "Available" del archivo
+    // de Amazon marca 0 (no disponibles para Prime). Cubre tanto inventario
+    // varado (total_units > 0) como FBA agotados (total_units === 0), para que
+    // sigan trackeando sus días sin Prime.
     // ===============================================================
     computeNotPrime() {
         return this.allData
-            .filter(i => i.inventory_amazon_available === 0 &&
-                (i.inventory_amazon > 0 || String(i.fba).trim().toUpperCase() === 'YES'))
+            .filter(i => String(i.fba).trim().toUpperCase() === 'YES' &&
+                i.inventory_amazon_available === 0)
             .sort((a, b) => b.inventory_amazon - a.inventory_amazon);
     }
 
