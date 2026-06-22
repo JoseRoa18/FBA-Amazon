@@ -572,7 +572,7 @@ class FbaAnalyzer {
             year: 'numeric', month: 'short', day: 'numeric',
             hour: '2-digit', minute: '2-digit',
         });
-        text.textContent = `Showing last saved analysis (${when}). Upload the three reports and run a new analysis to refresh.`;
+        text.textContent = `Showing last saved analysis (${when}). Upload the two reports and run a new analysis to refresh.`;
         banner.style.display = '';
     }
 
@@ -1572,9 +1572,12 @@ class FbaAnalyzer {
     // ---- EXPORT ----
     exportCSV() {
         if (!this.filteredData.length) return;
-        const wh = this.isAmazonUSA ? 'Inventory Flowery Branch' : 'Inventory Cambridge';
-        const headers = ['SKU','FBA','Category','Units Sold 30d',`Target ${this.selectedDays}d`,'Inventory Amazon (Total)','Inventory Amazon (Available)','Coverage Days','Pack Density',wh,'Stylish Inventory','Qty to Send','Method','Pallets','Inbound Units','Stylish ETA'];
-        const keys = ['sku','fba','category','units_sold','target','inventory_amazon','inventory_amazon_available','coverage_days','pack_density','inventory_warehouse','inventory_stylish','qty_to_send','how_to_send','qty_pallets','inventory_amazon_inbound','eta'];
+        // Una sola columna de inventario según marketplace: USA = Flowery Branch
+        // (warehouse), CA = Stylish (ya no usamos CIN7/Cambridge en Canadá).
+        const invHeader = this.isAmazonUSA ? 'Inventory Flowery Branch' : 'Stylish Inventory';
+        const invKey = this.isAmazonUSA ? 'inventory_warehouse' : 'inventory_stylish';
+        const headers = ['SKU','FBA','Category','Units Sold 30d',`Target ${this.selectedDays}d`,'Inventory Amazon (Total)','Inventory Amazon (Available)','Coverage Days','Pack Density',invHeader,'Qty to Send','Method','Pallets','Inbound Units','Stylish ETA'];
+        const keys = ['sku','fba','category','units_sold','target','inventory_amazon','inventory_amazon_available','coverage_days','pack_density',invKey,'qty_to_send','how_to_send','qty_pallets','inventory_amazon_inbound','eta'];
         const csvCell = v => { const s = String(v ?? ''); return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s; };
         const rows = [headers.join(',')];
         this.filteredData.forEach(i => rows.push(keys.map(k => csvCell(i[k])).join(',')));
@@ -1681,9 +1684,10 @@ class FbaAnalyzer {
     exportNotPrime() {
         const data = this._notPrimeFiltered || this.computeNotPrime();
         if (!data.length) return;
-        const wh = this.isAmazonUSA ? 'Inventory Flowery Branch' : 'Inventory Cambridge';
-        const headers = ['SKU','Category','FBA Total Units','Available for Prime','Days Unavailable','Units Sold 30d',wh,'Stylish Inventory','Inbound ETA'];
-        const keys = ['sku','category','inventory_amazon','inventory_amazon_available','days_unavailable','units_sold','inventory_warehouse','inventory_stylish','eta'];
+        const invHeader = this.isAmazonUSA ? 'Inventory Flowery Branch' : 'Stylish Inventory';
+        const invKey = this.isAmazonUSA ? 'inventory_warehouse' : 'inventory_stylish';
+        const headers = ['SKU','Category','FBA Total Units','Available for Prime','Days Unavailable','Units Sold 30d',invHeader,'Inbound ETA'];
+        const keys = ['sku','category','inventory_amazon','inventory_amazon_available','days_unavailable','units_sold',invKey,'eta'];
         const csvCell = v => { const s = String(v ?? ''); return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s; };
         const rows = [headers.join(',')];
         data.forEach(i => {
