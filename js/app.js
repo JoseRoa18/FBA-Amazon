@@ -266,9 +266,10 @@ class FbaAnalyzer {
     checkProcessBtn() {
         const btn = document.getElementById('process-btn');
         if (!btn) return;
-        // USA solo requiere 2 archivos (Amazon + inventario); CA también requiere Stylish.
-        const stylishOk = this.isAmazonUSA || !!this.files.stylish;
-        btn.disabled = !(this.files.amazon && this.files.cin7 && stylishOk);
+        // Cada marketplace usa 2 archivos: Amazon + un segundo archivo.
+        // USA: inventario (slot cin7 = Flowery Branch). CA: Stylish.
+        const secondFile = this.isAmazonUSA ? this.files.cin7 : this.files.stylish;
+        btn.disabled = !(this.files.amazon && secondFile);
     }
 
     async parseUploadedFile(file, opts = {}) {
@@ -333,7 +334,8 @@ class FbaAnalyzer {
     // RUN ANALYSIS — orquesta Partes 1 + 2 + 3
     // ===============================================================
     async runAnalysis() {
-        if (!this.files.amazon || !this.files.cin7 || (!this.isAmazonUSA && !this.files.stylish)) return;
+        const secondFile = this.isAmazonUSA ? this.files.cin7 : this.files.stylish;
+        if (!this.files.amazon || !secondFile) return;
         if (!this.config.info) {
             alert('La config todavía no terminó de cargar. Espera un segundo y vuelve a intentar.');
             return;
@@ -356,10 +358,14 @@ class FbaAnalyzer {
             const amazon = await this.parseUploadedFile(this.files.amazon);
             this.parsed.amazon = amazon;
             log(`  Amazon: ${amazon.rows.length} filas · ${amazon.headers.length} columnas`, 'ok');
-            const cin7 = await this.parseUploadedFile(this.files.cin7);
+            // CIN7 solo lo usa USA (inventario Flowery Branch). En CA queda vacío.
+            let cin7 = { headers: [], rows: [], raw: [] };
+            if (this.isAmazonUSA && this.files.cin7) {
+                cin7 = await this.parseUploadedFile(this.files.cin7);
+            }
             this.parsed.cin7 = cin7;
             log(`  CIN7:   ${cin7.rows.length} filas · ${cin7.headers.length} columnas`, 'ok');
-            // USA no usa archivo Stylish: dejamos parsed.stylish vacío (sin tránsito/ETA).
+            // Stylish solo lo usa CA (tránsito + ETA). En USA queda vacío.
             let stylish = { headers: [], rows: [], raw: [] };
             if (!this.isAmazonUSA && this.files.stylish) {
                 stylish = await this.parseUploadedFile(this.files.stylish, { detectStylish: true });
@@ -680,23 +686,26 @@ class FbaAnalyzer {
             }
         }
 
-        // Step 5: CIN7
-        const cin7Headers = this.parsed.cin7.headers;
-        const colSkuCin7 = FbaAnalyzer.detectCol(cin7Headers, ['SKU', 'Product Code', 'Item Code', 'sku', 'code', 'pn']);
-        const colOnHand  = FbaAnalyzer.detectCol(cin7Headers, ['OnHand', 'on hand', 'onhand']);
-        const colLoc     = FbaAnalyzer.detectCol(cin7Headers, ['Location', 'Warehouse', 'Site', 'location']);
-        if (!colSkuCin7) throw new Error("CIN7: no se encontró columna SKU.");
-        if (!colOnHand) throw new Error("CIN7: no se encontró columna OnHand.");
-        if (!colLoc) throw new Error("CIN7: no se encontró columna Location.");
-
-        const locationFilter = marketplace === 'usa' ? 'flowery branch' : 'cambridge';
+        // Step 5: CIN7 — solo USA (inventario Flowery Branch). En CA queda vacío
+        // porque ya no se usa CIN7; inventory_warehouse será 0.
         const cin7WH = {};
-        for (const r of this.parsed.cin7.rows) {
-            const sku = FbaAnalyzer.normalizeSku(r[colSkuCin7]);
-            if (!sku || !skuSet.has(sku)) continue;
-            const loc = FbaAnalyzer.normalize(r[colLoc]);
-            if (!loc || !loc.includes(locationFilter)) continue;
-            cin7WH[sku] = (cin7WH[sku] || 0) + FbaAnalyzer.toInt(r[colOnHand]);
+        if (this.parsed.cin7.rows.length) {
+            const cin7Headers = this.parsed.cin7.headers;
+            const colSkuCin7 = FbaAnalyzer.detectCol(cin7Headers, ['SKU', 'Product Code', 'Item Code', 'sku', 'code', 'pn']);
+            const colOnHand  = FbaAnalyzer.detectCol(cin7Headers, ['OnHand', 'on hand', 'onhand']);
+            const colLoc     = FbaAnalyzer.detectCol(cin7Headers, ['Location', 'Warehouse', 'Site', 'location']);
+            if (!colSkuCin7) throw new Error("CIN7: no se encontró columna SKU.");
+            if (!colOnHand) throw new Error("CIN7: no se encontró columna OnHand.");
+            if (!colLoc) throw new Error("CIN7: no se encontró columna Location.");
+
+            const locationFilter = marketplace === 'usa' ? 'flowery branch' : 'cambridge';
+            for (const r of this.parsed.cin7.rows) {
+                const sku = FbaAnalyzer.normalizeSku(r[colSkuCin7]);
+                if (!sku || !skuSet.has(sku)) continue;
+                const loc = FbaAnalyzer.normalize(r[colLoc]);
+                if (!loc || !loc.includes(locationFilter)) continue;
+                cin7WH[sku] = (cin7WH[sku] || 0) + FbaAnalyzer.toInt(r[colOnHand]);
+            }
         }
 
         // Step 6: Stylish
@@ -1543,7 +1552,7 @@ class FbaAnalyzer {
                 <td class="text-end value-mono ${item.inventory_amazon === 0 ? 'value-danger' : ''}">${this.fmtNum(item.inventory_amazon)}</td>
                 <td class="text-end"><span class="coverage-bar"><span class="bar"><span class="bar-fill" style="width:${covPct}%;background:${covColor}"></span></span><span class="value-mono" style="color:${covColor}">${covLabel}</span></span></td>
                 <td class="text-end value-mono ${item.pack_density === 0 ? 'value-muted' : ''}">${item.pack_density || '—'}</td>
-                <td class="text-end value-mono">${this.fmtNum(item.inventory_warehouse)}</td>
+                <td class="text-end value-mono col-warehouse">${this.fmtNum(item.inventory_warehouse)}</td>
                 <td class="text-end value-mono col-stylish ${item.inventory_stylish === 0 ? 'value-muted' : ''}">${this.fmtNum(item.inventory_stylish)}</td>
                 <td class="text-end value-mono ${item.qty_to_send > 0 ? 'value-danger' : 'value-muted'}">${this.fmtNum(item.qty_to_send)}</td>
                 <td><span class="badge-sm ${methodClass}">${item.how_to_send}</span></td>
@@ -2055,20 +2064,27 @@ class FbaAnalyzer {
         if (title) title.textContent = usa ? 'Amazon USA Restock' : 'Amazon CA Restock';
         if (thWH) thWH.textContent = usa ? 'Warehouse (Flowery Branch)' : 'Warehouse (Cambridge)';
 
-        // USA usa solo 2 archivos: ocultar la tarjeta de Stylish y ajustar textos.
+        // Cada marketplace muestra 2 tarjetas de upload:
+        //   USA → Amazon + Inventory ATL (slot cin7); se oculta Stylish.
+        //   CA  → Amazon + Stylish;                   se oculta CIN7.
         const stylishCol = document.getElementById('stylish-col');
         if (stylishCol) stylishCol.classList.toggle('d-none', usa);
+        const cin7Col = document.getElementById('cin7-col');
+        if (cin7Col) cin7Col.classList.toggle('d-none', !usa);
         const cin7Title = document.getElementById('cin7-report-title');
         if (cin7Title) cin7Title.textContent = usa ? 'Inventory ATL' : 'CIN7 Inventory';
         const uploadHint = document.getElementById('upload-files-hint');
-        if (uploadHint) uploadHint.textContent = usa
-            ? 'Drop your two source files to begin analysis'
-            : 'Drop your three source files to begin analysis';
+        if (uploadHint) uploadHint.textContent = 'Drop your two source files to begin analysis';
 
-        // USA no usa Stylish: ocultar la columna "Stylish inv." de la tabla y el
-        // KPI "No warehouse stock" (que se basa en ese mismo dato).
+        // Columnas de inventario de la tabla, según marketplace:
+        //   USA → columna "Warehouse" (Flowery Branch); se oculta "Stylish inv.".
+        //   CA  → columna "Stylish inv."; se oculta "Warehouse" (ya no usamos CIN7).
         const table = document.getElementById('results-table');
-        if (table) table.classList.toggle('hide-stylish', usa);
+        if (table) {
+            table.classList.toggle('hide-stylish', usa);
+            table.classList.toggle('hide-warehouse', !usa);
+        }
+        // KPI "No warehouse stock" se basa en Stylish: visible solo en CA.
         const cardNoWh = document.getElementById('card-nowarehouse');
         if (cardNoWh) cardNoWh.classList.toggle('d-none', usa);
 
