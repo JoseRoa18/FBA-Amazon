@@ -805,27 +805,36 @@ class FbaAnalyzer {
         };
     }
 
+    // Stock mínimo en Amazon para todo SKU con FBA=YES, aunque no tenga ventas.
+    static MIN_FBA_STOCK = 2;
+
+    // Regla de reposición (pura, sin DOM): target, qty_to_send, coverage, pallets y método.
+    static computeReplenishment(item, days) {
+        const dailySales = item.units_sold / 30;
+        const isFbaYes = String(item.fba ?? '').trim().toUpperCase() === 'YES';
+        let target = Math.max(0, Math.round(item.units_sold * (days / 30)));
+        if (isFbaYes) target = Math.max(target, FbaAnalyzer.MIN_FBA_STOCK);
+        const qty_to_send = Math.max(0, target - item.inventory_amazon);
+        const coverage_days = dailySales > 0 ? Math.round(item.inventory_amazon / dailySales) : 999;
+
+        let qty_pallets = 0;
+        if (item.pack_density > 0 && qty_to_send > 0) {
+            const raw = qty_to_send / item.pack_density;
+            qty_pallets = raw - Math.floor(raw) >= 0.70 ? Math.ceil(raw) : Math.floor(raw);
+        }
+
+        const cat = (item.category || '').toLowerCase();
+        const isSink = ['sink', 'assy sink', 'azuni sink', 'porcelain sink'].some(s => cat.includes(s));
+        let how_to_send = 'Loose';
+        if (qty_pallets >= 1) how_to_send = isSink ? 'Pallet' : 'Carton';
+
+        return { target, qty_to_send, coverage_days, qty_pallets, how_to_send };
+    }
+
     recalculate(reRender = true) {
         const days = this.selectedDays;
         this.allData.forEach(item => {
-            const dailySales = item.units_sold / 30;
-            item.target = Math.max(0, Math.round(item.units_sold * (days / 30)));
-            item.qty_to_send = Math.max(0, item.target - item.inventory_amazon);
-            item.coverage_days = dailySales > 0 ? Math.round(item.inventory_amazon / dailySales) : 999;
-
-            if (item.pack_density > 0 && item.qty_to_send > 0) {
-                const raw = item.qty_to_send / item.pack_density;
-                item.qty_pallets = raw - Math.floor(raw) >= 0.70 ? Math.ceil(raw) : Math.floor(raw);
-            } else {
-                item.qty_pallets = 0;
-            }
-
-            const cat = (item.category || '').toLowerCase();
-            const isSink = ['sink', 'assy sink', 'azuni sink', 'porcelain sink'].some(s => cat.includes(s));
-            if (item.qty_pallets === 0) item.how_to_send = 'Loose';
-            else if (item.qty_pallets >= 1 && isSink) item.how_to_send = 'Pallet';
-            else if (item.qty_pallets >= 1) item.how_to_send = 'Carton';
-            else item.how_to_send = 'Loose';
+            Object.assign(item, FbaAnalyzer.computeReplenishment(item, days));
         });
         if (reRender) this.applyFilters();
     }

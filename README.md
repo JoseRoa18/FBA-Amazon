@@ -1,4 +1,4 @@
-# FBA Analyzer v5.0
+# FBA Analyzer v5.1
 
 App 100% estática para análisis de inventario FBA. Todo el procesamiento corre en el browser; Supabase guarda el tracking histórico y snapshots.
 
@@ -52,6 +52,15 @@ fba-static/
 - `not_prime_tracking` (marketplace, sku, first_unavailable, last_seen)
 - `snapshots` (full JSONB dump de cada análisis)
 - Function `reconcile_not_prime(mp, skus)` - upsert atómico + compute days
+
+## Reglas de reposición
+
+- `target = round(units_sold_30d × días / 30)`
+- Todo SKU con **FBA = YES** tiene un stock mínimo de **2 unidades** en Amazon (USA y CA), aunque no tenga ventas: `target = max(target, 2)`.
+- `qty_to_send = max(0, target − inventario en Amazon)`
+- Pallets = `qty_to_send / pack density` (redondea arriba desde 0.70). Sinks van en Pallet, el resto en Carton; sin pallet completo va Loose.
+
+Tests: `npm test`
 
 ## Seguridad
 
