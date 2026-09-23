@@ -130,6 +130,11 @@ class FbaAnalyzer {
             card.addEventListener('click', () => this.toggleKpiFilter(card.dataset.filter));
         });
 
+        // Sub-conteo dentro de una tarjeta (ej. overstock sin ventas): filtra sin disparar la tarjeta
+        document.querySelectorAll('.kpi-sub.clickable').forEach(el => {
+            el.addEventListener('click', (e) => { e.stopPropagation(); this.toggleKpiFilter(el.dataset.filter); });
+        });
+
         // Context strip (FBA/Prime text links also behave as filters)
         document.querySelectorAll('.context-item.clickable-text').forEach(el => {
             el.addEventListener('click', () => this.toggleKpiFilter(el.dataset.filter));
@@ -466,6 +471,7 @@ class FbaAnalyzer {
         this.render();
         this.renderNotPrime();
         this.updateDashboard();
+        this.updateFilterCount();
     }
 
     // ===============================================================
@@ -738,7 +744,11 @@ class FbaAnalyzer {
             const inAmazon = skusInAmazonFile.has(sku);
             const invAmazon = amzInventory[sku] || 0;
             const unitsSold = amzUnitsSold[sku] || 0;
-            if (!inAmazon) { excludedNotInAmazon++; continue; }
+            // FBA=YES que no aparece en el reporte de Amazon: NO se descarta.
+            // Entra con ceros y marcado, para que cuente como OOS / Not Prime y
+            // reciba el stock mínimo. Los demás ausentes sí se excluyen.
+            if (!inAmazon && !isFbaYes) { excludedNotInAmazon++; continue; }
+            if (!inAmazon) fbaNotInAmazon++;
             if (!isFbaYes && invAmazon === 0 && unitsSold === 0) { excludedNoActivity++; continue; }
             out.push({
                 sku,
@@ -752,10 +762,8 @@ class FbaAnalyzer {
                 inventory_warehouse: cin7WH[sku] || 0,
                 inventory_stylish: stylishQty[sku] || 0,
                 eta: stylishETA[sku] || '',
+                not_in_amazon: !inAmazon,
             });
-        }
-        for (const fsku of Object.keys(fbaMap)) {
-            if (!skusInAmazonFile.has(fsku)) fbaNotInAmazon++;
         }
         out.sort((a, b) => a.sku.localeCompare(b.sku));
 
@@ -775,6 +783,7 @@ class FbaAnalyzer {
                 total_fba_yes: Object.keys(fbaMap).length,
                 fba_yes_in_amazon: Object.keys(fbaMap).length - fbaNotInAmazon,
                 fba_yes_not_in_amazon: fbaNotInAmazon,
+                fba_yes_not_in_amazon_skus: out.filter(o => o.not_in_amazon).map(o => o.sku),
                 unmapped_skus_count: unmappedSkus.size,
                 excluded_not_in_amazon: excludedNotInAmazon,
                 excluded_no_activity: excludedNoActivity,
@@ -800,6 +809,7 @@ class FbaAnalyzer {
             inventory_warehouse: Number(item.inventory_warehouse ?? 0),
             inventory_stylish: Number(item.inventory_stylish ?? 0),
             eta: item.eta ?? '',
+            not_in_amazon: item.not_in_amazon === true,
             target: 0, qty_to_send: 0, qty_pallets: 0,
             how_to_send: 'Loose', coverage_days: 0,
         };
@@ -862,7 +872,21 @@ class FbaAnalyzer {
         document.querySelectorAll('.kpi-card.clickable').forEach(c => {
             c.classList.toggle('active-filter', c.dataset.filter === this.activeKpiFilter);
         });
+        document.querySelectorAll('.kpi-sub.clickable').forEach(el => {
+            el.classList.toggle('active-filter', el.dataset.filter === this.activeKpiFilter);
+        });
         this.applyFilters();
+    }
+
+    // Punto 4: aviso con los FBA=YES que no vinieron en el reporte de Amazon.
+    renderMissingFbaAlert(skus) {
+        const box = document.getElementById('missing-fba-alert');
+        if (!box) return;
+        if (!skus.length) { box.style.display = 'none'; return; }
+        box.style.display = '';
+        this.setText('missing-fba-count', skus.length);
+        const list = document.getElementById('missing-fba-list');
+        if (list) list.innerHTML = skus.map(s => `<span class="badge-sm badge-missing">${this.esc(s)}</span>`).join('');
     }
 
     applyFilters() {
@@ -887,6 +911,7 @@ class FbaAnalyzer {
             if (kpi === 'inbound') return item.inventory_amazon_inbound > 0;
             if (kpi === 'nowarehouse') return item.inventory_stylish === 0;
             if (kpi === 'overstock') return item.coverage_days > 120;
+            if (kpi === 'overstock-nosales') return item.coverage_days > 120 && item.units_sold === 0;
             if (kpi === 'infba') return item.inventory_amazon > 0;
             if (kpi === 'inprime') return item.inventory_amazon_available > 0;
             return true;
@@ -904,7 +929,7 @@ class FbaAnalyzer {
         document.getElementById('filter-send-method').value = '';
         document.getElementById('filter-qty-to-send').checked = false;
         this.activeKpiFilter = null;
-        document.querySelectorAll('.kpi-card.clickable').forEach(c => c.classList.remove('active-filter'));
+        document.querySelectorAll('.kpi-card.clickable, .kpi-sub.clickable').forEach(c => c.classList.remove('active-filter'));
         this.filteredData = [...this.allData];
         this.render();
         this.updateDashboard();
@@ -922,12 +947,13 @@ class FbaAnalyzer {
         const data = this.allData;
         let oos = 0, low = 0, healthy = 0, overstock = 0;
         let totalSend = 0, inbound = 0, noWarehouse = 0, inFba = 0, inPrime = 0;
+        let overstockNoSales = 0;
 
         data.forEach(item => {
             const cls = this.classify(item);
             if (cls === 'oos') oos++;
             else if (cls === 'low') low++;
-            else if (cls === 'overstock') overstock++;
+            else if (cls === 'overstock') { overstock++; if (item.units_sold === 0) overstockNoSales++; }
             else healthy++;
             totalSend += item.qty_to_send;
             if (item.inventory_amazon_inbound > 0) inbound++;
@@ -944,6 +970,8 @@ class FbaAnalyzer {
         this.setText('kpi-inbound', inbound);
         this.setText('kpi-nowarehouse', noWarehouse);
         this.setText('kpi-overstock', overstock);
+        this.setText('kpi-overstock-nosales', overstockNoSales);
+        this.renderMissingFbaAlert(data.filter(i => i.not_in_amazon).map(i => i.sku));
         this.setText('kpi-infba', inFba);
         this.setText('kpi-inprime', inPrime);
 
@@ -1547,13 +1575,16 @@ class FbaAnalyzer {
             const rowClass = cls === 'oos' ? 'row-oos' : cls === 'low' ? 'row-low' : '';
             const fbaClass = item.fba.toLowerCase() === 'yes' ? 'badge-fba-yes' : 'badge-fba-no';
             const methodClass = item.how_to_send === 'Pallet' ? 'badge-pallet' : item.how_to_send === 'Carton' ? 'badge-carton' : item.how_to_send === 'Loose' ? 'badge-loose' : 'badge-method';
+            const noPack = item.pack_density === 0 && item.qty_to_send > 0;
+            const methodTitle = noPack ? ' title="No pack density in master: pallets cannot be computed, defaults to Loose"' : '';
+            const missingBadge = item.not_in_amazon ? ' <span class="badge-sm badge-missing" title="FBA=YES but not present in the Amazon restock report. Check the listing in Seller Central">Not in Amazon</span>' : '';
 
             const covPct = Math.min(100, Math.max(0, (item.coverage_days / 90) * 100));
             const covColor = item.coverage_days === 0 ? '#f85149' : item.coverage_days < 30 ? '#d29922' : item.coverage_days > 120 ? '#e3b341' : '#3fb950';
             const covLabel = item.coverage_days >= 999 ? '∞' : item.coverage_days + 'd';
 
             html += `<tr class="${rowClass}">
-                <td class="sku-cell">${this.esc(item.sku)}</td>
+                <td class="sku-cell">${this.esc(item.sku)}${missingBadge}</td>
                 <td><span class="badge-sm ${fbaClass}">${this.esc(item.fba)}</span></td>
                 <td>${this.esc(item.category)}</td>
                 <td class="text-end value-mono">${this.fmtNum(item.units_sold)}</td>
@@ -1564,7 +1595,7 @@ class FbaAnalyzer {
                 <td class="text-end value-mono col-warehouse">${this.fmtNum(item.inventory_warehouse)}</td>
                 <td class="text-end value-mono col-stylish ${item.inventory_stylish === 0 ? 'value-muted' : ''}">${this.fmtNum(item.inventory_stylish)}</td>
                 <td class="text-end value-mono ${item.qty_to_send > 0 ? 'value-danger' : 'value-muted'}">${this.fmtNum(item.qty_to_send)}</td>
-                <td><span class="badge-sm ${methodClass}">${item.how_to_send}</span></td>
+                <td><span class="badge-sm ${methodClass}"${methodTitle}>${item.how_to_send}${noPack ? ' <i class="fas fa-circle-question"></i>' : ''}</span></td>
                 <td class="text-end value-mono">${item.qty_pallets || '—'}</td>
                 <td>${
                     item.inventory_amazon_inbound > 0
@@ -1839,7 +1870,17 @@ class FbaAnalyzer {
                 this.chartNpDays = null;
             }
             card.style.display = 'none';
-            if (emptyCard) emptyCard.style.display = '';
+            if (emptyCard) {
+                emptyCard.style.display = '';
+                // Hay SKUs not-prime pero todavía no hay días sincronizados: no decir "todo OK".
+                const pending = notPrimeItems.length > 0;
+                const icon = emptyCard.querySelector('i');
+                const title = emptyCard.querySelector('p');
+                const sub = emptyCard.querySelector('small');
+                if (icon) icon.className = pending ? 'fas fa-clock' : 'fas fa-circle-check';
+                if (title) title.textContent = pending ? `${notPrimeItems.length} SKU${notPrimeItems.length === 1 ? '' : 's'} not Prime-available` : 'All FBA stock is Prime-available';
+                if (sub) sub.textContent = pending ? 'Days tracking pending · run an analysis to sync' : 'Great job keeping inventory healthy';
+            }
             return;
         }
         card.style.display = '';

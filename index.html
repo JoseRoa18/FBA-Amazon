@@ -25,7 +25,7 @@
             <i class="fas fa-cubes"></i>
             <span>FBA Analyzer</span>
         </div>
-        <span class="version-badge">v5.0 · static</span>
+        <span class="version-badge">v5.2 · static</span>
     </div>
     <div class="d-flex align-items-center gap-3">
         <div class="marketplace-toggle">
@@ -164,6 +164,9 @@
                 <div class="kpi-body">
                     <span class="kpi-value" id="kpi-overstock">0</span>
                     <span class="kpi-label">Overstocked</span>
+                    <span class="kpi-sub clickable" data-filter="overstock-nosales" title="Overstocked SKUs with 0 units sold in 30 days (coverage is undefined, not a real excess). Click to isolate them.">
+                        <span id="kpi-overstock-nosales">0</span> with no sales
+                    </span>
                 </div>
             </div>
         </div>
@@ -320,6 +323,14 @@
 <!-- Detail View Section (full-width, main source of truth) -->
 <section class="table-section" id="table-section" style="display:none;">
     <div class="container-fluid px-4">
+        <div id="missing-fba-alert" class="missing-fba-alert" style="display:none;">
+            <i class="fas fa-triangle-exclamation"></i>
+            <div>
+                <strong><span id="missing-fba-count">0</span> FBA=YES SKUs are not in the Amazon restock report.</strong>
+                They are listed below with 0 units so they count as OOS / Not Prime. Check the listings in Seller Central.
+                <div class="missing-fba-list" id="missing-fba-list"></div>
+            </div>
+        </div>
         <div class="section-header">
             <h2>
                 <i class="fas fa-table-columns me-2"></i>

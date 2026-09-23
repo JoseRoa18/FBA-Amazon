@@ -149,6 +149,23 @@ section { padding: 28px 0; }
 }
 .snapshot-banner i { color: var(--accent); flex-shrink: 0; }
 
+/* Aviso: FBA=YES ausentes del reporte de Amazon */
+.missing-fba-alert {
+    display: flex; align-items: flex-start; gap: 12px;
+    font-size: 13px; color: var(--text-secondary);
+    background: var(--danger-bg, rgba(248, 81, 73, 0.10)); border: 1px solid var(--danger);
+    border-radius: var(--radius-xs); padding: 12px 14px; margin-bottom: 16px;
+}
+.missing-fba-alert i { color: var(--danger); flex-shrink: 0; margin-top: 2px; }
+.missing-fba-alert strong { color: var(--text-primary); }
+.missing-fba-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+/* Sub-conteo dentro de una tarjeta KPI */
+.kpi-sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; font-family: var(--mono); }
+.kpi-sub.clickable { cursor: pointer; border-bottom: 1px dashed transparent; width: fit-content; }
+.kpi-sub.clickable:hover { color: var(--text-primary); border-bottom-color: var(--text-muted); }
+.kpi-sub.active-filter { color: var(--warning); border-bottom-color: var(--warning); }
+
 /* ---- UPLOAD CARDS ---- */
 .upload-card { background: var(--bg-card); border: 1px dashed var(--border); border-radius: var(--radius); padding: 28px 20px; text-align: center; cursor: pointer; transition: var(--transition); position: relative; overflow: hidden; }
 .upload-card:hover { border-color: var(--accent); background: var(--bg-surface); transform: translateY(-2px); box-shadow: var(--shadow); }
@@ -292,6 +309,7 @@ section { padding: 28px 0; }
 .badge-sm { font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 20px; font-family: var(--mono); display: inline-block; }
 .badge-fba-yes { background: var(--success-bg); color: var(--success); }
 .badge-fba-no { background: var(--bg-elevated); color: var(--text-muted); }
+.badge-missing { background: var(--danger-bg, rgba(248, 81, 73, 0.12)); color: var(--danger); border: 1px solid var(--danger); margin-left: 6px; font-size: 10px; }
 .badge-pallet { background: var(--danger-bg); color: var(--danger); }
 .badge-carton { background: rgba(255,159,28,.12); color: #ff9f1c; }
 [data-theme="light"] .badge-carton { background: rgba(200,120,0,.1); color: #9a6700; }
