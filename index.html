@@ -14,7 +14,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="js/config.js"></script>
 
-    <link rel="stylesheet" href="css/style.css?v=4.8">
+    <link rel="stylesheet" href="css/style.css?v=5.3">
 </head>
 <body>
 
@@ -25,9 +25,12 @@
             <i class="fas fa-cubes"></i>
             <span>FBA Analyzer</span>
         </div>
-        <span class="version-badge">v5.2 · static</span>
+        <span class="version-badge">v5.3 · static</span>
     </div>
     <div class="d-flex align-items-center gap-3">
+        <button class="btn-nav" id="sku-settings-btn" title="Discontinue SKUs or edit pack density">
+            <i class="fas fa-sliders me-1"></i>SKU settings
+        </button>
         <div class="marketplace-toggle">
             <span class="mp-label" id="mp-label-ca">
                 <img src="https://flagcdn.com/w20/ca.png" alt="CA" width="16"> CA
@@ -207,6 +210,11 @@
                 <i class="fas fa-crown"></i>
                 <strong id="kpi-inprime">0</strong> <span>available for Prime</span>
             </span>
+            <span class="context-sep ctx-discontinued-part d-none">·</span>
+            <span class="context-item ctx-discontinued-part d-none" id="ctx-discontinued" title="Discontinued SKUs are hidden from every report. Click to manage them.">
+                <i class="fas fa-ban"></i>
+                <strong id="kpi-discontinued">0</strong> <span>discontinued (hidden)</span>
+            </span>
         </div>
 
         <!-- Charts Row 1 (3 charts) -->
@@ -327,7 +335,7 @@
             <i class="fas fa-triangle-exclamation"></i>
             <div>
                 <strong><span id="missing-fba-count">0</span> FBA=YES SKUs are not in the Amazon restock report.</strong>
-                They are listed below with 0 units so they count as OOS / Not Prime. Check the listings in Seller Central.
+                They are listed below with 0 units so they count as OOS / Not Prime. Check the listings in Seller Central, or click a SKU to discontinue it if it is no longer sold.
                 <div class="missing-fba-list" id="missing-fba-list"></div>
             </div>
         </div>
@@ -452,7 +460,60 @@
     </div>
 </div>
 
+<!-- SKU settings: descontinuar SKUs y editar pack density (guardado en Supabase) -->
+<div class="modal fade" id="skuSettingsModal" tabindex="-1" aria-labelledby="sku-settings-title">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content sku-modal">
+            <div class="modal-header">
+                <h5 class="modal-title" id="sku-settings-title"><i class="fas fa-sliders me-2"></i>SKU settings</h5>
+                <button type="button" class="btn-clear" data-bs-dismiss="modal" aria-label="Close"><i class="fas fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <p class="sku-modal-hint">
+                    <strong>Discontinued</strong> SKUs are hidden from every report (dashboard, Not Prime, exports).
+                    A <strong>pack density</strong> set here replaces the master value; leave it empty to use the master.
+                    Changes save automatically and apply to USA and CA for everyone.
+                </p>
+                <div class="sku-settings-status" id="sku-settings-status"></div>
+                <div class="filter-bar filter-bar-compact">
+                    <div class="filter-group" style="flex:1; min-width:0;">
+                        <label for="sku-settings-search">Search</label>
+                        <input type="text" class="filter-input" id="sku-settings-search" placeholder="SKU or category...">
+                    </div>
+                    <div class="filter-group">
+                        <label for="sku-settings-filter">Show</label>
+                        <select class="filter-select" id="sku-settings-filter">
+                            <option value="">All SKUs</option>
+                            <option value="discontinued">Discontinued</option>
+                            <option value="custom-pack">Custom pack density</option>
+                            <option value="no-pack">No pack density</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>&nbsp;</label>
+                        <span class="badge-count" id="sku-settings-count">0 SKUs</span>
+                    </div>
+                </div>
+                <div class="table-scroll-wrapper sku-settings-wrapper">
+                    <table class="data-table compact-table sku-settings-table">
+                        <thead>
+                            <tr>
+                                <th>SKU</th>
+                                <th>Category</th>
+                                <th class="text-end">Master pack</th>
+                                <th class="text-end">Pack density</th>
+                                <th class="text-center">Discontinued</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sku-settings-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script src="js/app.js?v=5.0" defer></script>
+<script src="js/app.js?v=5.3" defer></script>
 </body>
 </html>

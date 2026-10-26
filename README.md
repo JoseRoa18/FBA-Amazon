@@ -1,4 +1,4 @@
-# FBA Analyzer v5.2
+# FBA Analyzer v5.3
 
 App 100% estática para análisis de inventario FBA. Todo el procesamiento corre en el browser; Supabase guarda el tracking histórico y snapshots.
 
@@ -52,6 +52,7 @@ fba-static/
 - `not_prime_tracking` (marketplace, sku, first_unavailable, last_seen_unavailable)
 - `snapshots` (full JSONB dump de cada análisis)
 - Function `reconcile_not_prime(mp, skus)` - upsert atómico + compute days
+- `sku_overrides` (sku, discontinued, pack_density, updated_at) — ajustes de "SKU settings". **Crear una vez** corriendo `supabase/sku_overrides.sql` en el SQL Editor de Supabase; hasta entonces el editor avisa y queda en solo lectura.
 
 ## Reglas de reposición
 
@@ -61,6 +62,17 @@ fba-static/
 - Pallets = `qty_to_send / pack density` (redondea arriba desde 0.70). Sinks van en Pallet, el resto en Carton; sin pallet completo va Loose. Si el SKU no tiene pack density en el maestro, siempre sale Loose y la fila lo avisa.
 - Un SKU **FBA = YES que no aparece en el reporte de Amazon** no se descarta: entra con 0 ventas / 0 inventario, marcado "Not in Amazon", cuenta como OOS y Not Prime, y se lista en un aviso sobre la tabla. Los SKUs no-FBA ausentes sí se excluyen.
 - La tarjeta **Overstocked** muestra aparte cuántos de esos SKUs tienen 0 ventas en 30 días (cobertura indefinida, no exceso real); el sub-conteo es clickeable para aislarlos.
+
+## SKU settings
+
+Botón **SKU settings** en la barra superior (también se abre clickeando el pack density de una fila, un SKU del aviso "not in the Amazon restock report" o el contador de descontinuados). Los cambios se guardan en `sku_overrides`, son compartidos y aplican a USA y CA:
+
+- **Discontinued**: el SKU desaparece de todo (KPIs, charts, tabla, Not Prime, aviso de ausentes, exports, conteos del snapshot). Es reversible: el snapshot guarda la data cruda y los overrides se aplican al mostrarla.
+- **Pack density**: reemplaza el valor de `data/info.csv` (vacío o igual al maestro = usar el maestro). En la tabla, un lápiz marca los valores editados.
+
+## Matching del reporte de Amazon
+
+Cada fila del Restock report se asocia a un SKU del maestro probando, en orden: Merchant SKU (USA directo, CA vía `can-sku.csv`), **Supplier part no.** y Supplier. Esto cubre ofertas FBA con Merchant SKU autogenerado por Amazon (ej. `RS-HRI7-BSCJ` → `S-832WN` en CA), que antes quedaban fuera y hacían que el SKU apareciera como "Not in Amazon" sin su inbound. El detalle de procesamiento lista esos alias y las filas que no matchearon.
 
 Tests: `npm test`
 

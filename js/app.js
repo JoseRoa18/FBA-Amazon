@@ -24,6 +24,12 @@ class FbaAnalyzer {
         this.selectedDays = 45;
         this.activeKpiFilter = null;
 
+        // Ajustes por SKU desde Supabase (sku_overrides): { sku: { discontinued, pack_density } }
+        // overridesStatus: 'off' (sin Supabase), 'ok', 'missing' (falta la tabla) o 'error'.
+        this.overrides = {};
+        this.overridesStatus = 'off';
+        this.overridesError = '';
+
         // Marketplace
         this.isAmazonUSA = false;
 
@@ -55,6 +61,10 @@ class FbaAnalyzer {
             const el = document.getElementById('loadingModal');
             this.loadingModal = el ? new bootstrap.Modal(el, { keyboard: false, backdrop: 'static' }) : null;
         } catch (e) { this.loadingModal = null; }
+        try {
+            const el = document.getElementById('skuSettingsModal');
+            this.skuSettingsModal = el ? new bootstrap.Modal(el) : null;
+        } catch (e) { this.skuSettingsModal = null; }
 
         this.init();
     }
@@ -177,8 +187,29 @@ class FbaAnalyzer {
         // Download JSON (debug)
         document.getElementById('download-json')?.addEventListener('click', () => this.downloadRawJSON());
 
+        // SKU settings (descontinuar / pack density). Se abre desde el top bar,
+        // desde la celda de pack density, el aviso de FBA ausentes o el contador de descontinuados.
+        document.getElementById('sku-settings-btn')?.addEventListener('click', () => this.openSkuSettings());
+        document.getElementById('results-body')?.addEventListener('click', (e) => {
+            const cell = e.target.closest('.pack-cell');
+            if (cell) this.openSkuSettings({ search: cell.dataset.sku });
+        });
+        document.getElementById('missing-fba-list')?.addEventListener('click', (e) => {
+            const badge = e.target.closest('[data-sku]');
+            if (badge) this.openSkuSettings({ search: badge.dataset.sku });
+        });
+        document.getElementById('ctx-discontinued')?.addEventListener('click', () => this.openSkuSettings({ filter: 'discontinued' }));
+        document.getElementById('sku-settings-search')?.addEventListener('input', () => this.renderSkuSettings());
+        document.getElementById('sku-settings-filter')?.addEventListener('change', () => this.renderSkuSettings());
+        document.getElementById('sku-settings-body')?.addEventListener('change', (e) => this.handleSkuSettingsChange(e));
+        document.getElementById('skuSettingsModal')?.addEventListener('shown.bs.modal', () => {
+            document.getElementById('sku-settings-search')?.focus();
+        });
+
         // Cargar config bundleada
         await this.loadConfig();
+        // Los overrides tienen que estar antes de pintar cualquier dashboard.
+        await this.loadOverrides();
 
         // Si todavía no se subieron archivos, mostrar el último análisis
         // guardado en Supabase (si existe) para no arrancar con la app vacía.
@@ -381,10 +412,16 @@ class FbaAnalyzer {
 
             // Procesamiento
             log('[Procesamiento]', 'label');
+            // Releer overrides: otro usuario pudo haber descontinuado SKUs o editado pack densities.
+            await this.loadOverrides();
+            const ovList = Object.values(this.overrides);
+            log(`  SKU settings: ${ovList.filter(o => o.discontinued).length} discontinuados, ${ovList.filter(o => o.pack_density).length} pack density editados (${this.overridesStatus})`, this.overridesStatus === 'ok' ? 'ok' : 'warn');
             const result = this.process(log);
             this.processedData = result.data;
             this.processedMeta = result.meta;
             log(`  ✓ Output: ${result.data.length} filas`, 'ok');
+            const hidden = result.data.filter(r => this.overrides[r.sku]?.discontinued).map(r => r.sku);
+            if (hidden.length) log(`  ${hidden.length} SKUs discontinuados ocultos del dashboard: ${hidden.join(', ')}`, 'warn');
             log('');
 
             // Dashboard
@@ -451,8 +488,7 @@ class FbaAnalyzer {
     // como por la restauración del último snapshot.
     // ===============================================================
     async showDashboard() {
-        this.allData = this.processedData.map(r => this.normalizeForDashboard(r));
-        this.recalculate(false);
+        this.buildAllData();
         this.filteredData = [...this.allData];
         this.extractCategories();
 
@@ -590,28 +626,35 @@ class FbaAnalyzer {
     // ===============================================================
     // PROCESS — lógica core (port de procesar.php)
     // ===============================================================
-    process(log) {
-        const marketplace = this.isAmazonUSA ? 'usa' : 'ca';
-
-        // Step 1: master
-        const master = {};
-        const skuSet = new Set();
-        const infoSkuKey = this.pickKey(this.config.info[0] || {}, ['product sku', 'sku']);
-        const infoCatKey = this.pickKey(this.config.info[0] || {}, ['category']);
-        const infoPackKey = this.pickKey(this.config.info[0] || {}, ['pack density', 'packdensity']);
+    // Maestro de SKUs desde info.csv: { sku: { category, pack_density } }.
+    // Lo usan process() (Step 1) y el editor de SKU settings.
+    buildMaster() {
+        const info = this.config.info || [];
+        const infoSkuKey = this.pickKey(info[0] || {}, ['product sku', 'sku']);
+        const infoCatKey = this.pickKey(info[0] || {}, ['category']);
+        const infoPackKey = this.pickKey(info[0] || {}, ['pack density', 'packdensity']);
         if (!infoSkuKey) throw new Error("info.csv: no se encontró columna SKU.");
         if (!infoCatKey) throw new Error("info.csv: no se encontró columna Category.");
         if (!infoPackKey) throw new Error("info.csv: no se encontró columna Pack Density.");
 
-        for (const row of this.config.info) {
+        const master = {};
+        for (const row of info) {
             const sku = FbaAnalyzer.normalizeSku(row[infoSkuKey]);
             if (!sku) continue;
-            skuSet.add(sku);
             master[sku] = {
                 category: String(row[infoCatKey] || '').trim(),
                 pack_density: FbaAnalyzer.toInt(row[infoPackKey]),
             };
         }
+        return master;
+    }
+
+    process(log) {
+        const marketplace = this.isAmazonUSA ? 'usa' : 'ca';
+
+        // Step 1: master
+        const master = this.buildMaster();
+        const skuSet = new Set(Object.keys(master));
 
         // Step 2: FBA
         const fbaRows = marketplace === 'usa' ? this.config.fbaUSA : this.config.fbaCA;
@@ -644,7 +687,10 @@ class FbaAnalyzer {
         // Step 4: Amazon
         const amzHeaders = this.parsed.amazon.headers;
         const colMerchantSKU = FbaAnalyzer.detectCol(amzHeaders, ['Merchant SKU', 'merchant sku', 'Seller SKU']);
-        const colSupplier    = FbaAnalyzer.detectCol(amzHeaders, ['Supplier', 'Supplier SKU', 'Supplier Code', 'Vendor SKU', 'Supplier part no.', 'Supplier part no']);
+        // "Supplier part no." trae el part number aunque la oferta FBA use otro Merchant SKU
+        // (ej. el autogenerado RS-HRI7-BSCJ de S-832WN en CA). "Supplier" suele venir "unassigned".
+        const colSupplierPart = FbaAnalyzer.detectColStrict(amzHeaders, ['Supplier part no.', 'Supplier part no', 'Supplier part number']);
+        const colSupplier    = FbaAnalyzer.detectCol(amzHeaders, ['Supplier', 'Supplier SKU', 'Supplier Code', 'Vendor SKU']);
         let colSold30 = FbaAnalyzer.detectColStrict(amzHeaders, ['Units Sold Last 30 Days', 'Units sold last 30 days']);
         if (!colSold30) colSold30 = FbaAnalyzer.detectCol(amzHeaders, ['Units Sold (30 days)', 'Units ordered (last 30 days)', 'Units ordered - last 30 days', 'units_sold_30d']);
         let colTotalUnit = FbaAnalyzer.detectColStrict(amzHeaders, ['Total Units', 'total units']);
@@ -657,32 +703,29 @@ class FbaAnalyzer {
         if (!colInbound && amzHeaders[13]) colInbound = amzHeaders[13]; // fallback: 14ta columna (index 13)
         if (!colSold30 && amzHeaders[11]) colSold30 = amzHeaders[11];
         if (!colTotalUnit && amzHeaders[12]) colTotalUnit = amzHeaders[12];
-        if (!colMerchantSKU && !colSupplier) throw new Error("Amazon: no se encontró 'Merchant SKU' ni 'Supplier'.");
+        if (!colMerchantSKU && !colSupplierPart && !colSupplier) throw new Error("Amazon: no se encontró 'Merchant SKU' ni 'Supplier'.");
         if (!colSold30) throw new Error("Amazon: no se encontró columna Units Sold 30d.");
         if (!colTotalUnit) throw new Error("Amazon: no se encontró columna Total Units.");
 
         const amzUnitsSold = {}, amzInventory = {}, amzAvailable = {}, amzInbound = {};
         const skusInAmazonFile = new Set();
         const unmappedSkus = new Set();
+        const aliasedRows = [];   // filas con Merchant SKU no relacionado al part number (ej. RS-HRI7-BSCJ → S-832WN)
 
         for (const r of this.parsed.amazon.rows) {
-            let partNumber = '';
-            if (colMerchantSKU) {
-                const msku = FbaAnalyzer.normalizeSku(r[colMerchantSKU]);
-                // USA: SKU directo (identidad). CA: traducir vía mapping.
-                if (msku) {
-                    if (marketplace === 'usa') partNumber = msku;
-                    else if (skuMapping[msku]) partNumber = skuMapping[msku];
-                }
-            }
-            if (!partNumber && colSupplier) {
-                const sup = FbaAnalyzer.normalizeSku(r[colSupplier]);
-                if (sup && sup !== 'UNASSIGNED') partNumber = sup;
-            }
-            if (!partNumber || !skuSet.has(partNumber)) {
-                if (partNumber) unmappedSkus.add(partNumber);
+            // USA: SKU directo (identidad). CA: traducir vía mapping.
+            const msku = colMerchantSKU ? FbaAnalyzer.normalizeSku(r[colMerchantSKU]) : '';
+            const fromMsku = marketplace === 'usa' ? msku : (skuMapping[msku] || '');
+            const supplierPart = colSupplierPart ? FbaAnalyzer.normalizeSku(r[colSupplierPart]) : '';
+            const supplier = colSupplier ? FbaAnalyzer.normalizeSku(r[colSupplier]) : '';
+            // Gana el primer candidato que exista en el maestro.
+            const partNumber = [fromMsku, supplierPart, supplier].find(c => c && skuSet.has(c));
+            if (!partNumber) {
+                const label = fromMsku || supplierPart || msku;
+                if (label) unmappedSkus.add(label);
                 continue;
             }
+            if (msku && !msku.includes(partNumber)) aliasedRows.push(`${msku} → ${partNumber}`);
             skusInAmazonFile.add(partNumber);
             amzUnitsSold[partNumber] = (amzUnitsSold[partNumber] || 0) + FbaAnalyzer.toInt(r[colSold30]);
             amzInventory[partNumber] = (amzInventory[partNumber] || 0) + FbaAnalyzer.toInt(r[colTotalUnit]);
@@ -691,6 +734,8 @@ class FbaAnalyzer {
                 amzInbound[partNumber] = (amzInbound[partNumber] || 0) + FbaAnalyzer.toInt(r[colInbound]);
             }
         }
+        if (aliasedRows.length) log(`  Amazon: ${aliasedRows.length} filas con Merchant SKU distinto al part number (matcheadas por Supplier part no.): ${aliasedRows.join(', ')}`, 'warn');
+        if (unmappedSkus.size) log(`  Amazon: ${unmappedSkus.size} filas sin SKU en el maestro (ignoradas): ${[...unmappedSkus].join(', ')}`, 'warn');
 
         // Step 5: CIN7 — solo USA (inventario Flowery Branch). En CA queda vacío
         // porque ya no se usa CIN7; inventory_warehouse será 0.
@@ -772,7 +817,9 @@ class FbaAnalyzer {
             meta: {
                 marketplace,
                 amazon_merchant_col: colMerchantSKU,
+                amazon_supplier_part_col: colSupplierPart,
                 amazon_supplier_col: colSupplier,
+                amazon_aliased_rows: aliasedRows,
                 amazon_sold30_col: colSold30,
                 amazon_inventory_col: colTotalUnit,
                 amazon_available_col: colAvailable,
@@ -806,6 +853,8 @@ class FbaAnalyzer {
             inventory_amazon_available: Number(item.inventory_amazon_available ?? 0),
             inventory_amazon_inbound: Number(item.inventory_amazon_inbound ?? 0),
             pack_density: Number(item.pack_density ?? 0),
+            // Solo viene cuando el pack density fue editado en SKU settings (valor de info.csv).
+            pack_density_master: item.pack_density_master ?? null,
             inventory_warehouse: Number(item.inventory_warehouse ?? 0),
             inventory_stylish: Number(item.inventory_stylish ?? 0),
             eta: item.eta ?? '',
@@ -839,6 +888,25 @@ class FbaAnalyzer {
         if (qty_pallets >= 1) how_to_send = isSink ? 'Pallet' : 'Carton';
 
         return { target, qty_to_send, coverage_days, qty_pallets, how_to_send };
+    }
+
+    // Pura: saca los SKUs discontinuados y aplica el pack density editado.
+    // No muta las filas: processedData se guarda tal cual en el snapshot, así
+    // que reactivar un SKU o borrar un override lo vuelve a mostrar.
+    static applyOverrides(rows, overrides) {
+        return rows
+            .filter(r => !overrides[r.sku]?.discontinued)
+            .map(r => {
+                const pack = overrides[r.sku]?.pack_density;
+                return pack > 0 ? { ...r, pack_density: pack, pack_density_master: r.pack_density ?? 0 } : r;
+            });
+    }
+
+    // processedData (live o snapshot) + overrides → allData con la reposición calculada.
+    buildAllData() {
+        this.allData = FbaAnalyzer.applyOverrides(this.processedData, this.overrides)
+            .map(r => this.normalizeForDashboard(r));
+        this.recalculate(false);
     }
 
     recalculate(reRender = true) {
@@ -886,7 +954,7 @@ class FbaAnalyzer {
         box.style.display = '';
         this.setText('missing-fba-count', skus.length);
         const list = document.getElementById('missing-fba-list');
-        if (list) list.innerHTML = skus.map(s => `<span class="badge-sm badge-missing">${this.esc(s)}</span>`).join('');
+        if (list) list.innerHTML = skus.map(s => `<span class="badge-sm badge-missing clickable" data-sku="${this.esc(s)}" title="Open SKU settings (discontinue / pack density)">${this.esc(s)}</span>`).join('');
     }
 
     applyFilters() {
@@ -974,6 +1042,9 @@ class FbaAnalyzer {
         this.renderMissingFbaAlert(data.filter(i => i.not_in_amazon).map(i => i.sku));
         this.setText('kpi-infba', inFba);
         this.setText('kpi-inprime', inPrime);
+        const discontinued = Object.values(this.overrides).filter(o => o.discontinued).length;
+        this.setText('kpi-discontinued', discontinued);
+        document.querySelectorAll('.ctx-discontinued-part').forEach(el => el.classList.toggle('d-none', discontinued === 0));
 
         // Coalescar llamadas rápidas (el usuario tipeando en el filtro) en un solo render.
         if (this._chartRaf) cancelAnimationFrame(this._chartRaf);
@@ -1578,6 +1649,10 @@ class FbaAnalyzer {
             const noPack = item.pack_density === 0 && item.qty_to_send > 0;
             const methodTitle = noPack ? ' title="No pack density in master: pallets cannot be computed, defaults to Loose"' : '';
             const missingBadge = item.not_in_amazon ? ' <span class="badge-sm badge-missing" title="FBA=YES but not present in the Amazon restock report. Check the listing in Seller Central">Not in Amazon</span>' : '';
+            const packCustom = item.pack_density_master != null;
+            const packTitle = packCustom
+                ? `Custom pack density (master: ${item.pack_density_master || '—'}). Click to edit`
+                : 'Click to edit pack density or discontinue this SKU';
 
             const covPct = Math.min(100, Math.max(0, (item.coverage_days / 90) * 100));
             const covColor = item.coverage_days === 0 ? '#f85149' : item.coverage_days < 30 ? '#d29922' : item.coverage_days > 120 ? '#e3b341' : '#3fb950';
@@ -1591,7 +1666,7 @@ class FbaAnalyzer {
                 <td class="text-end value-mono">${this.fmtNum(item.target)}</td>
                 <td class="text-end value-mono ${item.inventory_amazon === 0 ? 'value-danger' : ''}">${this.fmtNum(item.inventory_amazon)}</td>
                 <td class="text-end"><span class="coverage-bar"><span class="bar"><span class="bar-fill" style="width:${covPct}%;background:${covColor}"></span></span><span class="value-mono" style="color:${covColor}">${covLabel}</span></span></td>
-                <td class="text-end value-mono ${item.pack_density === 0 ? 'value-muted' : ''}">${item.pack_density || '—'}</td>
+                <td class="text-end value-mono pack-cell ${item.pack_density === 0 ? 'value-muted' : ''}" data-sku="${this.esc(item.sku)}" title="${packTitle}">${packCustom ? '<i class="fas fa-pen pack-custom"></i>' : ''}${item.pack_density || '—'}</td>
                 <td class="text-end value-mono col-warehouse">${this.fmtNum(item.inventory_warehouse)}</td>
                 <td class="text-end value-mono col-stylish ${item.inventory_stylish === 0 ? 'value-muted' : ''}">${this.fmtNum(item.inventory_stylish)}</td>
                 <td class="text-end value-mono ${item.qty_to_send > 0 ? 'value-danger' : 'value-muted'}">${this.fmtNum(item.qty_to_send)}</td>
@@ -1740,6 +1815,175 @@ class FbaAnalyzer {
         link.download = `fba_not_prime_${this.isAmazonUSA ? 'usa' : 'ca'}_${new Date().toISOString().substring(0, 10)}.csv`;
         link.click();
         URL.revokeObjectURL(link.href);
+    }
+
+    // ===============================================================
+    // SKU SETTINGS — overrides por SKU en Supabase (tabla sku_overrides,
+    // ver supabase/sku_overrides.sql). Compartidos por todo el equipo y
+    // aplicados en USA y CA:
+    //   discontinued → el SKU no aparece en ningún reporte (KPIs, charts,
+    //                  tabla, Not Prime, aviso de ausentes, exports)
+    //   pack_density → reemplaza el valor de info.csv
+    // Se aplican en buildAllData(), así que también corrigen un snapshot
+    // restaurado sin volver a correr el análisis.
+    // ===============================================================
+    async loadOverrides() {
+        if (!this.supabase) { this.overridesStatus = 'off'; return; }
+        try {
+            const { data, error } = await this.supabase
+                .from('sku_overrides')
+                .select('sku, discontinued, pack_density');
+            if (error) {
+                // PGRST205 / 42P01: la tabla todavía no se creó en Supabase.
+                this.overridesStatus = ['PGRST205', '42P01'].includes(error.code) ? 'missing' : 'error';
+                this.overridesError = error.message;
+                return;
+            }
+            this.overrides = {};
+            (data || []).forEach(row => {
+                const sku = FbaAnalyzer.normalizeSku(row.sku);
+                if (sku) this.overrides[sku] = { discontinued: row.discontinued === true, pack_density: row.pack_density || null };
+            });
+            this.overridesStatus = 'ok';
+        } catch (err) {
+            this.overridesStatus = 'error';
+            this.overridesError = err.message;
+        }
+    }
+
+    // Guarda un cambio parcial ({ discontinued } o { pack_density }). Si el SKU
+    // queda sin ningún ajuste, borra la fila en vez de dejarla vacía.
+    async saveOverride(sku, patch) {
+        const next = { discontinued: false, pack_density: null, ...this.overrides[sku], ...patch };
+        const empty = !next.discontinued && !next.pack_density;
+        const table = this.supabase.from('sku_overrides');
+        const { error } = empty
+            ? await table.delete().eq('sku', sku)
+            : await table.upsert({ sku, discontinued: next.discontinued, pack_density: next.pack_density, updated_at: new Date().toISOString() });
+        if (error) throw new Error(error.message);
+        if (empty) delete this.overrides[sku];
+        else this.overrides[sku] = { discontinued: next.discontinued, pack_density: next.pack_density };
+        this.refreshAfterOverrides();
+    }
+
+    // Repinta el dashboard con los overrides actuales, conservando filtros.
+    refreshAfterOverrides() {
+        if (!this.dataSource) return;
+        this.buildAllData();
+        this.applyFilters();
+        this.renderNotPrime();
+    }
+
+    openSkuSettings({ search = '', filter = '' } = {}) {
+        const searchEl = document.getElementById('sku-settings-search');
+        const filterEl = document.getElementById('sku-settings-filter');
+        if (searchEl) searchEl.value = search;
+        if (filterEl) filterEl.value = filter;
+        this.renderSkuSettingsStatus();
+        this.renderSkuSettings();
+        this.skuSettingsModal?.show();
+        // Si la tabla no estaba lista (ej. recién se corrió el SQL), reintentar.
+        if (this.supabase && this.overridesStatus !== 'ok') {
+            this.loadOverrides().then(() => {
+                this.renderSkuSettingsStatus();
+                this.renderSkuSettings();
+                if (this.overridesStatus === 'ok') this.refreshAfterOverrides();
+            });
+        }
+    }
+
+    renderSkuSettingsStatus() {
+        if (this.overridesStatus === 'off') this.setSkuSettingsStatus('warn', 'Supabase is not configured: settings cannot be saved.');
+        else if (this.overridesStatus === 'missing') this.setSkuSettingsStatus('warn', 'Table sku_overrides not found. Run supabase/sku_overrides.sql once in the Supabase SQL editor.');
+        else if (this.overridesStatus === 'error') this.setSkuSettingsStatus('err', `Could not load settings: ${this.overridesError}`);
+        else this.setSkuSettingsStatus('', '');
+    }
+
+    setSkuSettingsStatus(kind, msg) {
+        const el = document.getElementById('sku-settings-status');
+        if (!el) return;
+        el.className = 'sku-settings-status' + (kind ? ` status-${kind}` : '');
+        el.textContent = msg;
+    }
+
+    renderSkuSettings() {
+        const tbody = document.getElementById('sku-settings-body');
+        if (!tbody) return;
+        let master = {};
+        try { master = this.buildMaster(); } catch (e) { /* info.csv todavía cargando */ }
+        const search = (document.getElementById('sku-settings-search')?.value || '').toLowerCase().trim();
+        const filter = document.getElementById('sku-settings-filter')?.value || '';
+        const total = Object.keys(master).length;
+
+        const rows = Object.keys(master).sort()
+            .map(sku => ({ sku, ...master[sku], ov: this.overrides[sku] || {} }))
+            .filter(r => {
+                if (search && !r.sku.toLowerCase().includes(search) && !r.category.toLowerCase().includes(search)) return false;
+                if (filter === 'discontinued') return r.ov.discontinued === true;
+                if (filter === 'custom-pack') return r.ov.pack_density > 0;
+                if (filter === 'no-pack') return !r.pack_density && !r.ov.pack_density;
+                return true;
+            });
+
+        this.setText('sku-settings-count', rows.length === total ? `${total} SKUs` : `${rows.length} / ${total} SKUs`);
+
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="empty-state"><i class="fas fa-filter-circle-xmark"></i><span>No SKUs match filters</span></td></tr>';
+            return;
+        }
+
+        const dis = this.overridesStatus === 'ok' ? '' : ' disabled';
+        tbody.innerHTML = rows.map(r => `<tr data-sku="${this.esc(r.sku)}" data-master-pack="${r.pack_density}" class="${r.ov.discontinued ? 'row-discontinued' : ''}">
+                <td class="sku-cell">${this.esc(r.sku)}</td>
+                <td class="cat-truncate" title="${this.esc(r.category)}">${this.esc(r.category)}</td>
+                <td class="text-end value-mono value-muted">${r.pack_density || '—'}</td>
+                <td class="text-end"><input type="number" min="1" step="1" class="filter-input pack-input" value="${r.ov.pack_density || ''}" placeholder="${r.pack_density || '—'}" aria-label="Pack density for ${this.esc(r.sku)}"${dis}></td>
+                <td class="text-center"><label class="switch switch-danger" title="Hide this SKU from every report"><input type="checkbox" class="disc-toggle" aria-label="Discontinue ${this.esc(r.sku)}"${r.ov.discontinued ? ' checked' : ''}${dis}><span class="slider"></span></label></td>
+            </tr>`).join('');
+    }
+
+    // Refleja en una fila del editor lo que quedó guardado (sin repintar la tabla,
+    // para no perder el foco ni el scroll).
+    syncSkuSettingsRow(tr) {
+        const ov = this.overrides[tr.dataset.sku] || {};
+        tr.classList.toggle('row-discontinued', ov.discontinued === true);
+        tr.querySelector('.pack-input').value = ov.pack_density || '';
+        tr.querySelector('.disc-toggle').checked = ov.discontinued === true;
+    }
+
+    async handleSkuSettingsChange(e) {
+        const tr = e.target.closest('tr[data-sku]');
+        if (!tr || this.overridesStatus !== 'ok') return;
+        const sku = tr.dataset.sku;
+
+        let patch, msg;
+        if (e.target.classList.contains('disc-toggle')) {
+            patch = { discontinued: e.target.checked };
+            msg = patch.discontinued ? `${sku} discontinued · hidden from all reports` : `${sku} is back in the reports`;
+        } else if (e.target.classList.contains('pack-input')) {
+            const raw = e.target.value.trim();
+            const n = Number(raw);
+            if (raw !== '' && !(Number.isInteger(n) && n > 0)) {
+                this.setSkuSettingsStatus('err', `${sku}: pack density must be a whole number above 0`);
+                this.syncSkuSettingsRow(tr);
+                return;
+            }
+            // Vacío o igual al maestro = sin override.
+            const masterPack = Number(tr.dataset.masterPack) || 0;
+            patch = { pack_density: raw === '' || n === masterPack ? null : n };
+            msg = patch.pack_density ? `${sku} pack density set to ${n}` : `${sku} pack density back to master (${masterPack || '—'})`;
+        } else return;
+
+        tr.classList.add('row-saving');
+        try {
+            await this.saveOverride(sku, patch);
+            this.setSkuSettingsStatus('ok', `✓ ${msg}`);
+        } catch (err) {
+            this.setSkuSettingsStatus('err', `Could not save ${sku}: ${err.message}`);
+        } finally {
+            tr.classList.remove('row-saving');
+            this.syncSkuSettingsRow(tr);
+        }
     }
 
     // ===============================================================

@@ -856,3 +856,37 @@ section { padding: 28px 0; }
     margin-top: 3px;
     letter-spacing: 0.02em;
 }
+
+/* ============================================================
+   SKU settings (v5.3) — descontinuar SKUs / editar pack density
+   ============================================================ */
+.sku-modal { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius); }
+.sku-modal .modal-header { border-bottom-color: var(--border); }
+.sku-modal .modal-title { font-size: 16px; font-weight: 600; }
+.sku-modal .modal-title i { color: var(--text-secondary); }
+.sku-modal-hint { font-size: 12.5px; color: var(--text-secondary); margin: 0 0 10px; line-height: 1.5; }
+.sku-modal-hint strong { color: var(--text-primary); }
+.sku-settings-status { font-size: 12px; font-family: var(--mono); min-height: 18px; margin-bottom: 8px; }
+.sku-settings-status.status-ok { color: var(--success); }
+.sku-settings-status.status-warn { color: var(--warning); }
+.sku-settings-status.status-err { color: var(--danger); }
+.sku-settings-wrapper { max-height: 55vh; }
+.sku-settings-table .pack-input { width: 84px; min-width: 0; padding: 4px 8px; text-align: right; font-family: var(--mono); font-size: 12px; }
+/* Vacío = usa el maestro (placeholder tenue); con valor = override (resaltado). */
+.sku-settings-table .pack-input::placeholder { color: var(--text-muted); opacity: 1; }
+.sku-settings-table .pack-input:not(:placeholder-shown) { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.sku-settings-table .switch { vertical-align: middle; }
+.sku-settings-table .pack-input:disabled,
+.sku-settings-table .disc-toggle:disabled + .slider { opacity: 0.4; cursor: not-allowed; }
+.sku-settings-table tr.row-discontinued td:not(:last-child) { opacity: 0.45; }
+.sku-settings-table tr.row-discontinued .sku-cell { text-decoration: line-through; }
+.sku-settings-table tr.row-saving { opacity: 0.6; pointer-events: none; }
+.switch-danger input:checked + .slider { border-color: var(--danger); background: var(--danger-bg); }
+.switch-danger input:checked + .slider::before { background: var(--danger); }
+
+/* Detail view: la celda de pack density abre SKU settings */
+.data-table .pack-cell { cursor: pointer; }
+.data-table .pack-cell:hover { color: var(--accent); text-decoration: underline dotted; }
+.pack-custom { font-size: 9px; color: var(--accent); margin-right: 5px; vertical-align: 1px; }
+.badge-missing.clickable { cursor: pointer; }
+.badge-missing.clickable:hover { background: var(--danger); color: #fff; }

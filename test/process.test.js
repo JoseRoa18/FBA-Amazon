@@ -11,9 +11,9 @@ vm.createContext(ctx);
 const FbaAnalyzer = vm.runInContext(src + '\n;FbaAnalyzer;', ctx);
 
 // Instancia sin constructor (el constructor toca el DOM).
-function makeApp({ amazonRows }) {
+function makeApp({ amazonRows, usa = true }) {
     const app = Object.create(FbaAnalyzer.prototype);
-    app.isAmazonUSA = true;
+    app.isAmazonUSA = usa;
     app.config = {
         info: [
             { 'SKU': 'P-201', 'Category': 'PORCELAIN SINK', 'Pack Density': '28' },
@@ -21,10 +21,10 @@ function makeApp({ amazonRows }) {
             { 'SKU': 'K-100', 'Category': 'FAUCET', 'Pack Density': '12' },
         ],
         fbaUSA: [['P-201', 'Yes'], ['P-202', 'Yes']],
-        fbaCA: [],
-        skuMapCA: [],
+        fbaCA: [['P-201', 'Yes'], ['P-202', 'Yes']],
+        skuMapCA: [{ 'sku': 'P-201-CAN', 'part #': 'P-201' }, { 'sku': 'P-202-CAN', 'part #': 'P-202' }],
     };
-    const headers = ['merchant sku', 'units sold last 30 days', 'total units', 'inbound', 'available'];
+    const headers = ['merchant sku', 'supplier', 'supplier part no.', 'units sold last 30 days', 'total units', 'inbound', 'available'];
     app.parsed = {
         amazon: { headers, rows: amazonRows },
         cin7: { headers: [], rows: [] },
@@ -33,8 +33,8 @@ function makeApp({ amazonRows }) {
     return app;
 }
 
-const amzRow = (sku, sold, total, inbound, avail) => ({
-    'merchant sku': sku, 'units sold last 30 days': String(sold), 'total units': String(total), 'inbound': String(inbound), 'available': String(avail),
+const amzRow = (sku, sold, total, inbound, avail, extra = {}) => ({
+    'merchant sku': sku, 'units sold last 30 days': String(sold), 'total units': String(total), 'inbound': String(inbound), 'available': String(avail), ...extra,
 });
 
 test('FBA=YES presente en Amazon sale normal, sin marca', () => {
@@ -74,4 +74,36 @@ test('FBA=YES ausente recibe mínimo 2 y clasifica como OOS / Not Prime', () => 
     const r = FbaAnalyzer.computeReplenishment(p202, 45);
     assert.equal(r.qty_to_send, 2);
     assert.equal(app.classify({ ...p202, ...r }), 'oos');
+});
+
+test('CA: oferta FBA con Merchant SKU autogenerado se matchea por Supplier part no.', () => {
+    const app = makeApp({ usa: false, amazonRows: [
+        amzRow('P-201-CAN', 3, 10, 0, 10),
+        amzRow('RS-HRI7-BSCJ', 1, 2, 4, 2, { 'supplier': 'unassigned', 'supplier part no.': 'P-202' }),
+    ] });
+    const { data, meta } = app.process(() => {});
+    const p202 = data.find(d => d.sku === 'P-202');
+    assert.equal(p202.not_in_amazon, false);
+    assert.equal(p202.inventory_amazon, 2);
+    assert.equal(p202.inventory_amazon_inbound, 4);
+    assert.deepEqual([...meta.amazon_aliased_rows], ['RS-HRI7-BSCJ → P-202']);
+});
+
+test('USA: Merchant SKU con sufijo cae a Supplier part no. (sin loguearlo como alias)', () => {
+    const app = makeApp({ amazonRows: [
+        amzRow('P-201-USA', 3, 10, 2, 8, { 'supplier part no.': 'P-201' }),
+        amzRow('P-202', 0, 1, 0, 1),
+    ] });
+    const { data, meta } = app.process(() => {});
+    const p201 = data.find(d => d.sku === 'P-201');
+    assert.equal(p201.not_in_amazon, false);
+    assert.equal(p201.inventory_amazon, 10);
+    assert.equal(meta.amazon_aliased_rows.length, 0);
+});
+
+test('El Merchant SKU tiene prioridad sobre Supplier part no.', () => {
+    const app = makeApp({ amazonRows: [amzRow('P-201', 3, 10, 2, 8, { 'supplier part no.': 'P-202' })] });
+    const { data } = app.process(() => {});
+    assert.equal(data.find(d => d.sku === 'P-201').inventory_amazon, 10);
+    assert.equal(data.find(d => d.sku === 'P-202').not_in_amazon, true);
 });
