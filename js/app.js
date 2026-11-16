@@ -37,6 +37,8 @@ class FbaAnalyzer {
         this.preferFile = false;
         // { sku: qty } del último análisis hecho con Odoo; null si se usó archivo.
         this.odooStock = null;
+        // { sku: { date, qty } }: próxima llegada al almacén según Odoo.
+        this.odooEta = null;
 
         // Marketplace
         this.isAmazonUSA = false;
@@ -451,12 +453,16 @@ class FbaAnalyzer {
             // Inventario desde Odoo: Available for Use del almacén del marketplace.
             // Se vuelve a pedir en cada análisis para no usar el dato del arranque.
             this.odooStock = null;
+            this.odooEta = null;
             if (fromOdoo) {
                 try {
                     const inv = await this.fetchOdooInventory(this.isAmazonUSA ? 'usa' : 'ca');
                     this.odooStock = inv.stock;
+                    this.odooEta = inv.eta || {};
                     this.odoo.warehouse = inv.warehouse;
                     log(`  Odoo:   ${inv.count} SKUs · almacén ${inv.warehouse} · Available for Use (${inv.fetched_at})`, 'ok');
+                    log(`  Odoo:   ${Object.keys(this.odooEta).length} SKUs con llegada en tránsito (ETA)`, 'ok');
+                    if (inv.eta_error) log(`  Odoo:   no se pudo calcular el ETA (${inv.eta_error})`, 'warn');
                 } catch (err) {
                     throw new Error(`No se pudo leer el inventario de Odoo (${err.message}). Reintenta, o elige "Use a file instead" para subir el archivo de inventario.`);
                 }
@@ -468,10 +474,9 @@ class FbaAnalyzer {
             }
             this.parsed.cin7 = cin7;
             log(`  CIN7:   ${cin7.rows.length} filas · ${cin7.headers.length} columnas`, 'ok');
-            // Stylish solo lo usa CA (tránsito + ETA). En USA queda vacío.
-            // Con Odoo es opcional: la cantidad sale de Odoo y el archivo solo aporta el ETA.
+            // Stylish solo lo usa CA (tránsito + ETA) cuando no hay Odoo. En USA queda vacío.
             let stylish = { headers: [], rows: [], raw: [] };
-            if (!this.isAmazonUSA && this.files.stylish) {
+            if (!fromOdoo && !this.isAmazonUSA && this.files.stylish) {
                 stylish = await this.parseUploadedFile(this.files.stylish, { detectStylish: true });
             }
             this.parsed.stylish = stylish;
@@ -849,10 +854,11 @@ class FbaAnalyzer {
             if (eta) stylishETA[sku] = eta;
         }
 
-        // Odoo (Available for Use) reemplaza al archivo como cantidad en almacén:
-        // USA → inventory_warehouse (ATL), CA → inventory_stylish (CBG).
-        // El ETA de CA sigue saliendo del archivo Stylish, si se subió.
+        // Odoo reemplaza a los archivos de inventario:
+        //   cantidad → Available for Use: USA → inventory_warehouse (ATL), CA → inventory_stylish (CBG)
+        //   ETA      → próxima llegada al almacén ({ date, qty }), en ambos marketplaces
         const odoo = this.odooStock;
+        const odooEta = this.odooEta || {};
         const warehouseQty = odoo && marketplace === 'usa' ? odoo : cin7WH;
         const stylishStock = odoo && marketplace === 'ca' ? odoo : stylishQty;
 
@@ -881,7 +887,8 @@ class FbaAnalyzer {
                 pack_density: master[sku]?.pack_density || 0,
                 inventory_warehouse: warehouseQty[sku] || 0,
                 inventory_stylish: stylishStock[sku] || 0,
-                eta: stylishETA[sku] || '',
+                eta: (odoo ? odooEta[sku]?.date : stylishETA[sku]) || '',
+                eta_qty: (odoo && odooEta[sku]?.qty) || 0,
                 not_in_amazon: !inAmazon,
             });
         }
@@ -934,6 +941,8 @@ class FbaAnalyzer {
             inventory_warehouse: Number(item.inventory_warehouse ?? 0),
             inventory_stylish: Number(item.inventory_stylish ?? 0),
             eta: item.eta ?? '',
+            // Unidades que suma la próxima llegada al almacén (solo con ETA de Odoo).
+            eta_qty: Number(item.eta_qty ?? 0),
             not_in_amazon: item.not_in_amazon === true,
             target: 0, qty_to_send: 0, qty_pallets: 0,
             how_to_send: 'Loose', coverage_days: 0,
@@ -1729,6 +1738,10 @@ class FbaAnalyzer {
             const packTitle = packCustom
                 ? `Custom pack density (master: ${item.pack_density_master || '—'}). Click to edit`
                 : 'Click to edit pack density or discontinue this SKU';
+            // El ETA es la próxima llegada al almacén propio (no a Amazon).
+            const etaTitle = item.eta
+                ? `Next warehouse arrival: ${item.eta}${item.eta_qty ? ` (+${this.fmtNum(item.eta_qty)} available for use)` : ''}`
+                : '';
 
             const covPct = Math.min(100, Math.max(0, (item.coverage_days / 90) * 100));
             const covColor = item.coverage_days === 0 ? '#f85149' : item.coverage_days < 30 ? '#d29922' : item.coverage_days > 120 ? '#e3b341' : '#3fb950';
@@ -1750,9 +1763,9 @@ class FbaAnalyzer {
                 <td class="text-end value-mono">${item.qty_pallets || '—'}</td>
                 <td>${
                     item.inventory_amazon_inbound > 0
-                        ? `<span class="badge-sm badge-inbound"><i class="fas fa-plane-arrival me-1"></i>${this.fmtNum(item.inventory_amazon_inbound)} units</span>${item.eta ? `<div class="inbound-eta">ETA ${this.esc(item.eta)}</div>` : ''}`
+                        ? `<span class="badge-sm badge-inbound"><i class="fas fa-plane-arrival me-1"></i>${this.fmtNum(item.inventory_amazon_inbound)} units</span>${item.eta ? `<div class="inbound-eta" title="${this.esc(etaTitle)}">ETA ${this.esc(item.eta)}</div>` : ''}`
                         : (item.eta
-                            ? `<span class="badge-sm badge-inbound-eta" title="Stylish ETA only, no units shipped to Amazon yet"><i class="far fa-calendar me-1"></i>${this.esc(item.eta)}</span>`
+                            ? `<span class="badge-sm badge-inbound-eta" title="${this.esc(etaTitle)}. No units shipped to Amazon yet"><i class="far fa-calendar me-1"></i>${this.esc(item.eta)}</span>`
                             : '<span class="value-muted">—</span>')
                 }</td>
             </tr>`;
@@ -2159,9 +2172,9 @@ class FbaAnalyzer {
         // Poblar resumen con las fuentes usadas en el análisis
         const names = [];
         if (this.files.amazon?.name) names.push(this.files.amazon.name);
-        if (this.odooStock) names.push(`Odoo ${this.odoo.warehouse} (Available for Use)`);
-        else if (this.isAmazonUSA && this.files.cin7?.name) names.push(this.files.cin7.name);
-        if (!this.isAmazonUSA && this.files.stylish?.name) names.push(this.files.stylish.name);
+        const inventoryFile = this.isAmazonUSA ? this.files.cin7 : this.files.stylish;
+        if (this.odooStock) names.push(`Odoo ${this.odoo.warehouse} (Available for Use + ETA)`);
+        else if (inventoryFile?.name) names.push(inventoryFile.name);
         const text = document.getElementById('upload-collapsed-text');
         const time = document.getElementById('upload-collapsed-time');
         if (text) text.textContent = names.length ? names.join(' · ') : 'Files loaded';
@@ -2442,12 +2455,10 @@ class FbaAnalyzer {
 
         // Tarjetas de upload según marketplace y fuente del inventario:
         //   Sin Odoo: USA → Amazon + Inventory ATL (slot cin7); CA → Amazon + Stylish.
-        //   Con Odoo: USA → solo Amazon; CA → Amazon + Stylish opcional (solo ETA).
+        //   Con Odoo: solo Amazon (cantidad y ETA salen de Odoo).
         const fromOdoo = this.inventoryFromOdoo;
         const stylishCol = document.getElementById('stylish-col');
-        if (stylishCol) stylishCol.classList.toggle('d-none', usa);
-        const stylishHint = document.getElementById('stylish-hint');
-        if (stylishHint) stylishHint.textContent = fromOdoo ? 'Optional · ETA only' : 'XLSX';
+        if (stylishCol) stylishCol.classList.toggle('d-none', usa || fromOdoo);
         const cin7Col = document.getElementById('cin7-col');
         if (cin7Col) cin7Col.classList.toggle('d-none', !usa || fromOdoo);
         const cin7Title = document.getElementById('cin7-report-title');
@@ -2489,7 +2500,7 @@ class FbaAnalyzer {
         } else if (this.preferFile) {
             [state, label, action] = ['file', 'Inventory from the uploaded file', 'Use Odoo instead'];
         } else {
-            [state, label, action] = ['ok', `Inventory from Odoo · ${warehouse} · Available for Use`, 'Use a file instead'];
+            [state, label, action] = ['ok', `Inventory and ETA from Odoo · ${warehouse} · Available for Use`, 'Use a file instead'];
         }
         box.dataset.state = state;
         text.textContent = label;

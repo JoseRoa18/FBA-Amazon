@@ -108,37 +108,51 @@ test('El Merchant SKU tiene prioridad sobre Supplier part no.', () => {
     assert.equal(data.find(d => d.sku === 'P-202').not_in_amazon, true);
 });
 
-test('USA con Odoo: inventory_warehouse sale de Odoo y el archivo no cuenta', () => {
+test('USA con Odoo: inventory_warehouse y ETA salen de Odoo y el archivo no cuenta', () => {
     const app = makeApp({ amazonRows: [amzRow('P-201', 3, 10, 2, 8), amzRow('P-202', 0, 0, 0, 0)] });
     app.parsed.cin7 = { headers: ['sku', 'onhand', 'location'], rows: [{ 'sku': 'P-201', 'onhand': '999', 'location': 'Flowery Branch' }] };
     app.odooStock = { 'P-201': 111 };
+    app.odooEta = { 'P-201': { date: '2026-11-17', qty: 30 } };
     const { data, meta } = app.process(() => {});
-    assert.equal(data.find(d => d.sku === 'P-201').inventory_warehouse, 111);
+    const p201 = data.find(d => d.sku === 'P-201');
+    assert.equal(p201.inventory_warehouse, 111);
+    assert.equal(p201.eta, '2026-11-17');
+    assert.equal(p201.eta_qty, 30);
     assert.equal(data.find(d => d.sku === 'P-202').inventory_warehouse, 0);
     assert.equal(meta.inventory_source, 'odoo');
 });
 
-test('CA con Odoo: inventory_stylish sale de Odoo y el ETA del archivo Stylish', () => {
-    const app = makeApp({ usa: false, amazonRows: [amzRow('P-201-CAN', 3, 10, 0, 10)] });
+test('CA con Odoo: cantidad y ETA salen de Odoo, no del archivo Stylish', () => {
+    const app = makeApp({ usa: false, amazonRows: [amzRow('P-201-CAN', 3, 10, 0, 10), amzRow('P-202-CAN', 0, 5, 0, 5)] });
     app.parsed.stylish = {
         headers: ['part number', 'quantity in stock canada', 'eta can'],
-        rows: [{ 'part number': 'P-201', 'quantity in stock canada': '5', 'eta can': 'Dec 12' }],
+        rows: [{ 'part number': 'P-201', 'quantity in stock canada': '5', 'eta can': 'Dec 12' }, { 'part number': 'P-202', 'quantity in stock canada': '9', 'eta can': 'Dec 30' }],
     };
-    app.odooStock = { 'P-201': 72 };
+    app.odooStock = { 'P-201': 72, 'P-202': 4 };
+    app.odooEta = { 'P-201': { date: '2026-11-22', qty: 172 } };
     const { data } = app.process(() => {});
     const p201 = data.find(d => d.sku === 'P-201');
     assert.equal(p201.inventory_stylish, 72);
-    assert.equal(p201.eta, 'Dec 12');
+    assert.equal(p201.eta, '2026-11-22');
+    assert.equal(p201.eta_qty, 172);
     assert.equal(p201.inventory_warehouse, 0);
+    // sin llegada en Odoo no hay ETA, aunque el archivo traiga uno
+    const p202 = data.find(d => d.sku === 'P-202');
+    assert.equal(p202.inventory_stylish, 4);
+    assert.equal(p202.eta, '');
+    assert.equal(p202.eta_qty, 0);
 });
 
-test('sin Odoo el inventario sale del archivo', () => {
+test('sin Odoo el inventario y el ETA salen del archivo', () => {
     const app = makeApp({ usa: false, amazonRows: [amzRow('P-201-CAN', 3, 10, 0, 10)] });
     app.parsed.stylish = {
         headers: ['part number', 'quantity in stock canada', 'eta can'],
         rows: [{ 'part number': 'P-201', 'quantity in stock canada': '5', 'eta can': 'Dec 12' }],
     };
     const { data, meta } = app.process(() => {});
-    assert.equal(data.find(d => d.sku === 'P-201').inventory_stylish, 5);
+    const p201 = data.find(d => d.sku === 'P-201');
+    assert.equal(p201.inventory_stylish, 5);
+    assert.equal(p201.eta, 'Dec 12');
+    assert.equal(p201.eta_qty, 0);
     assert.equal(meta.inventory_source, 'file');
 });

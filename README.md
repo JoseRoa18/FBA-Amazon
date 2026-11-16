@@ -1,4 +1,4 @@
-# FBA Analyzer v5.4
+# FBA Analyzer v5.5
 
 App estática para análisis de inventario FBA. Todo el procesamiento corre en el browser; Supabase guarda el tracking histórico y snapshots, y una función serverless de Vercel trae el inventario en vivo desde Odoo.
 
@@ -77,10 +77,18 @@ El inventario de almacén ya no necesita archivo: sale de Odoo, del reporte **In
 | CA | `CBG` | Stylish inv. |
 | USA | `ATL` | Warehouse (Flowery Branch) |
 
-- La app llama a `GET /api/odoo-inventory?mp=ca|usa` (función de Vercel). La función se autentica con las env vars `ODOO_URL`, `ODOO_DB`, `ODOO_USER`, `ODOO_API_KEY`, lee `available_for_use` con el mismo contexto `warehouse_id` que usa el panel de almacenes del reporte, y devuelve `{ SKU: qty }` solo para los SKUs de `data/info.csv`. Solo hace lecturas; la respuesta se cachea 60 s en el CDN.
-- Con Odoo conectado alcanza con subir el reporte de Amazon. En CA el archivo Stylish queda opcional: si se sube, solo aporta el **ETA** (la cantidad sale de Odoo).
+- La app llama a `GET /api/odoo-inventory?mp=ca|usa` (función de Vercel). La función se autentica con las env vars `ODOO_URL`, `ODOO_DB`, `ODOO_USER`, `ODOO_API_KEY`, lee `available_for_use` con el mismo contexto `warehouse_id` que usa el panel de almacenes del reporte, y devuelve `stock: { SKU: qty }` y `eta: { SKU: { date, qty } }` solo para los SKUs de `data/info.csv`. Solo hace lecturas; la respuesta se cachea 60 s en el CDN.
+- Con Odoo conectado alcanza con subir el reporte de Amazon, en USA y en CA: cantidad y ETA salen de Odoo.
 - Bajo las tarjetas de upload se ve la fuente activa. **Use a file instead** vuelve al flujo de 2 archivos; si la función no responde (o corriendo en local, donde no existe) la app cae sola a ese flujo.
 - SKUs del maestro que no existen en Odoo quedan en 0.
+
+### ETA (próxima llegada al almacén)
+
+En Odoo un contenedor en tránsito es una **transferencia interna abierta** desde un almacén de proveedor (Irene, Elina, Bonnie…) hacia `CBG/Stock` o `ATL/Stock`; su **Scheduled Date** es la llegada. Esos contenedores traen sobre todo componentes (`A401`, `BX-401`, `G-401`…), no el SKU terminado, así que:
+
+> **ETA de un SKU = primera fecha en que su Available for Use aumenta**, y `qty` es cuánto sube ese día.
+
+Para eso la función replica el cálculo del reporte (terminado libre + armable; por tipo de BoM: sin BoM, manufactura, kit de un componente, kit de varios; las etiquetas `L…` no cuentan) y simula las llegadas en orden. Salvaguardas: solo se informa ETA de un SKU si el modelo da exactamente el Available for Use de hoy de Odoo, y si el cálculo falla el stock se devuelve igual (`eta_error`). La fecha se muestra en la columna **Inbound** (el tooltip dice cuántas unidades suma) y en la columna *Stylish ETA* del export.
 
 ## SKU settings
 
