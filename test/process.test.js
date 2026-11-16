@@ -107,3 +107,38 @@ test('El Merchant SKU tiene prioridad sobre Supplier part no.', () => {
     assert.equal(data.find(d => d.sku === 'P-201').inventory_amazon, 10);
     assert.equal(data.find(d => d.sku === 'P-202').not_in_amazon, true);
 });
+
+test('USA con Odoo: inventory_warehouse sale de Odoo y el archivo no cuenta', () => {
+    const app = makeApp({ amazonRows: [amzRow('P-201', 3, 10, 2, 8), amzRow('P-202', 0, 0, 0, 0)] });
+    app.parsed.cin7 = { headers: ['sku', 'onhand', 'location'], rows: [{ 'sku': 'P-201', 'onhand': '999', 'location': 'Flowery Branch' }] };
+    app.odooStock = { 'P-201': 111 };
+    const { data, meta } = app.process(() => {});
+    assert.equal(data.find(d => d.sku === 'P-201').inventory_warehouse, 111);
+    assert.equal(data.find(d => d.sku === 'P-202').inventory_warehouse, 0);
+    assert.equal(meta.inventory_source, 'odoo');
+});
+
+test('CA con Odoo: inventory_stylish sale de Odoo y el ETA del archivo Stylish', () => {
+    const app = makeApp({ usa: false, amazonRows: [amzRow('P-201-CAN', 3, 10, 0, 10)] });
+    app.parsed.stylish = {
+        headers: ['part number', 'quantity in stock canada', 'eta can'],
+        rows: [{ 'part number': 'P-201', 'quantity in stock canada': '5', 'eta can': 'Dec 12' }],
+    };
+    app.odooStock = { 'P-201': 72 };
+    const { data } = app.process(() => {});
+    const p201 = data.find(d => d.sku === 'P-201');
+    assert.equal(p201.inventory_stylish, 72);
+    assert.equal(p201.eta, 'Dec 12');
+    assert.equal(p201.inventory_warehouse, 0);
+});
+
+test('sin Odoo el inventario sale del archivo', () => {
+    const app = makeApp({ usa: false, amazonRows: [amzRow('P-201-CAN', 3, 10, 0, 10)] });
+    app.parsed.stylish = {
+        headers: ['part number', 'quantity in stock canada', 'eta can'],
+        rows: [{ 'part number': 'P-201', 'quantity in stock canada': '5', 'eta can': 'Dec 12' }],
+    };
+    const { data, meta } = app.process(() => {});
+    assert.equal(data.find(d => d.sku === 'P-201').inventory_stylish, 5);
+    assert.equal(meta.inventory_source, 'file');
+});

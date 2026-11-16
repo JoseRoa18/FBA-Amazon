@@ -30,6 +30,14 @@ class FbaAnalyzer {
         this.overridesStatus = 'off';
         this.overridesError = '';
 
+        // Inventario desde Odoo (función /api/odoo-inventory): "Available for Use" del
+        // almacén del marketplace (CA = CBG, USA = ATL). status: 'checking', 'ok' u 'off'.
+        this.odoo = { status: 'checking', warehouse: '', error: '' };
+        // El usuario eligió subir el archivo de inventario aunque Odoo esté disponible.
+        this.preferFile = false;
+        // { sku: qty } del último análisis hecho con Odoo; null si se usó archivo.
+        this.odooStock = null;
+
         // Marketplace
         this.isAmazonUSA = false;
 
@@ -121,6 +129,13 @@ class FbaAnalyzer {
 
         document.getElementById('process-btn')?.addEventListener('click', () => this.runAnalysis());
 
+        // Fuente del inventario: alterna Odoo / archivo, o reintenta si Odoo no respondió.
+        document.getElementById('inventory-source-toggle')?.addEventListener('click', () => {
+            if (this.odoo.status === 'off') { this.checkOdoo(); return; }
+            this.preferFile = !this.preferFile;
+            this.updateMarketplaceUI();
+        });
+
         // Upload collapse / expand toggle
         document.getElementById('upload-expand-btn')?.addEventListener('click', () => this.expandUploadSection());
 
@@ -205,6 +220,9 @@ class FbaAnalyzer {
         document.getElementById('skuSettingsModal')?.addEventListener('shown.bs.modal', () => {
             document.getElementById('sku-settings-search')?.focus();
         });
+
+        // En paralelo con el resto del arranque: ¿hay inventario de Odoo disponible?
+        this.checkOdoo();
 
         // Cargar config bundleada
         await this.loadConfig();
@@ -302,10 +320,45 @@ class FbaAnalyzer {
     checkProcessBtn() {
         const btn = document.getElementById('process-btn');
         if (!btn) return;
-        // Cada marketplace usa 2 archivos: Amazon + un segundo archivo.
-        // USA: inventario (slot cin7 = Flowery Branch). CA: Stylish.
+        // Con Odoo alcanza el reporte de Amazon. Sin Odoo hace falta un segundo
+        // archivo de inventario: USA = slot cin7 (Flowery Branch), CA = Stylish.
         const secondFile = this.isAmazonUSA ? this.files.cin7 : this.files.stylish;
-        btn.disabled = !(this.files.amazon && secondFile);
+        btn.disabled = !(this.files.amazon && (this.inventoryFromOdoo || secondFile));
+    }
+
+    // ===============================================================
+    // ODOO — inventario en vivo vía /api/odoo-inventory (función de Vercel
+    // que guarda las credenciales). Si la función no existe o falla (ej.
+    // corriendo en local), la app sigue funcionando con el archivo subido.
+    // ===============================================================
+    get inventoryFromOdoo() {
+        return this.odoo.status === 'ok' && !this.preferFile;
+    }
+
+    async fetchOdooInventory(mp) {
+        const resp = await fetch(`api/odoo-inventory?mp=${mp}`, { headers: { Accept: 'application/json' } });
+        let body = null;
+        try { body = await resp.json(); } catch (e) { /* server estático sin la función: no es JSON */ }
+        if (!resp.ok || !body?.stock) throw new Error(body?.error || `HTTP ${resp.status}`);
+        return body;
+    }
+
+    // Prueba la conexión para el marketplace actual y actualiza la UI de uploads.
+    async checkOdoo() {
+        const mp = this.isAmazonUSA ? 'usa' : 'ca';
+        this.odoo = { status: 'checking', warehouse: '', error: '' };
+        this.updateMarketplaceUI();
+        let next;
+        try {
+            const body = await this.fetchOdooInventory(mp);
+            next = { status: 'ok', warehouse: body.warehouse, error: '' };
+        } catch (err) {
+            next = { status: 'off', warehouse: '', error: err.message };
+        }
+        // Si el usuario cambió de marketplace mientras tanto, esta respuesta ya no aplica.
+        if (mp !== (this.isAmazonUSA ? 'usa' : 'ca')) return;
+        this.odoo = next;
+        this.updateMarketplaceUI();
     }
 
     async parseUploadedFile(file, opts = {}) {
@@ -370,8 +423,9 @@ class FbaAnalyzer {
     // RUN ANALYSIS — orquesta Partes 1 + 2 + 3
     // ===============================================================
     async runAnalysis() {
+        const fromOdoo = this.inventoryFromOdoo;
         const secondFile = this.isAmazonUSA ? this.files.cin7 : this.files.stylish;
-        if (!this.files.amazon || !secondFile) return;
+        if (!this.files.amazon || !(fromOdoo || secondFile)) return;
         if (!this.config.info) {
             alert('La config todavía no terminó de cargar. Espera un segundo y vuelve a intentar.');
             return;
@@ -394,14 +448,28 @@ class FbaAnalyzer {
             const amazon = await this.parseUploadedFile(this.files.amazon);
             this.parsed.amazon = amazon;
             log(`  Amazon: ${amazon.rows.length} filas · ${amazon.headers.length} columnas`, 'ok');
-            // CIN7 solo lo usa USA (inventario Flowery Branch). En CA queda vacío.
+            // Inventario desde Odoo: Available for Use del almacén del marketplace.
+            // Se vuelve a pedir en cada análisis para no usar el dato del arranque.
+            this.odooStock = null;
+            if (fromOdoo) {
+                try {
+                    const inv = await this.fetchOdooInventory(this.isAmazonUSA ? 'usa' : 'ca');
+                    this.odooStock = inv.stock;
+                    this.odoo.warehouse = inv.warehouse;
+                    log(`  Odoo:   ${inv.count} SKUs · almacén ${inv.warehouse} · Available for Use (${inv.fetched_at})`, 'ok');
+                } catch (err) {
+                    throw new Error(`No se pudo leer el inventario de Odoo (${err.message}). Reintenta, o elige "Use a file instead" para subir el archivo de inventario.`);
+                }
+            }
+            // CIN7 solo lo usa USA (inventario Flowery Branch) cuando no hay Odoo. En CA queda vacío.
             let cin7 = { headers: [], rows: [], raw: [] };
-            if (this.isAmazonUSA && this.files.cin7) {
+            if (!fromOdoo && this.isAmazonUSA && this.files.cin7) {
                 cin7 = await this.parseUploadedFile(this.files.cin7);
             }
             this.parsed.cin7 = cin7;
             log(`  CIN7:   ${cin7.rows.length} filas · ${cin7.headers.length} columnas`, 'ok');
             // Stylish solo lo usa CA (tránsito + ETA). En USA queda vacío.
+            // Con Odoo es opcional: la cantidad sale de Odoo y el archivo solo aporta el ETA.
             let stylish = { headers: [], rows: [], raw: [] };
             if (!this.isAmazonUSA && this.files.stylish) {
                 stylish = await this.parseUploadedFile(this.files.stylish, { detectStylish: true });
@@ -614,7 +682,7 @@ class FbaAnalyzer {
             year: 'numeric', month: 'short', day: 'numeric',
             hour: '2-digit', minute: '2-digit',
         });
-        text.textContent = `Showing last saved analysis (${when}). Upload the two reports and run a new analysis to refresh.`;
+        text.textContent = `Showing last saved analysis (${when}). Run a new analysis to refresh.`;
         banner.style.display = '';
     }
 
@@ -781,6 +849,13 @@ class FbaAnalyzer {
             if (eta) stylishETA[sku] = eta;
         }
 
+        // Odoo (Available for Use) reemplaza al archivo como cantidad en almacén:
+        // USA → inventory_warehouse (ATL), CA → inventory_stylish (CBG).
+        // El ETA de CA sigue saliendo del archivo Stylish, si se subió.
+        const odoo = this.odooStock;
+        const warehouseQty = odoo && marketplace === 'usa' ? odoo : cin7WH;
+        const stylishStock = odoo && marketplace === 'ca' ? odoo : stylishQty;
+
         // Step 7: output
         const out = [];
         let excludedNotInAmazon = 0, excludedNoActivity = 0, fbaNotInAmazon = 0;
@@ -804,8 +879,8 @@ class FbaAnalyzer {
                 inventory_amazon_available: amzAvailable[sku] || 0,
                 inventory_amazon_inbound: amzInbound[sku] || 0,
                 pack_density: master[sku]?.pack_density || 0,
-                inventory_warehouse: cin7WH[sku] || 0,
-                inventory_stylish: stylishQty[sku] || 0,
+                inventory_warehouse: warehouseQty[sku] || 0,
+                inventory_stylish: stylishStock[sku] || 0,
                 eta: stylishETA[sku] || '',
                 not_in_amazon: !inAmazon,
             });
@@ -816,6 +891,7 @@ class FbaAnalyzer {
             data: out,
             meta: {
                 marketplace,
+                inventory_source: odoo ? 'odoo' : 'file',
                 amazon_merchant_col: colMerchantSKU,
                 amazon_supplier_part_col: colSupplierPart,
                 amazon_supplier_col: colSupplier,
@@ -2080,11 +2156,12 @@ class FbaAnalyzer {
         if (!full || !bar) return;
         full.style.display = 'none';
         bar.style.display = '';
-        // Poblar resumen con los nombres de archivos subidos
+        // Poblar resumen con las fuentes usadas en el análisis
         const names = [];
-        ['amazon', 'cin7', 'stylish'].forEach(type => {
-            if (this.files[type]?.name) names.push(this.files[type].name);
-        });
+        if (this.files.amazon?.name) names.push(this.files.amazon.name);
+        if (this.odooStock) names.push(`Odoo ${this.odoo.warehouse} (Available for Use)`);
+        else if (this.isAmazonUSA && this.files.cin7?.name) names.push(this.files.cin7.name);
+        if (!this.isAmazonUSA && this.files.stylish?.name) names.push(this.files.stylish.name);
         const text = document.getElementById('upload-collapsed-text');
         const time = document.getElementById('upload-collapsed-time');
         if (text) text.textContent = names.length ? names.join(' · ') : 'Files loaded';
@@ -2345,7 +2422,8 @@ class FbaAnalyzer {
 
     handleMarketplaceChange(e) {
         this.isAmazonUSA = e.target.checked;
-        this.updateMarketplaceUI();
+        // El almacén de Odoo cambia con el marketplace (CBG / ATL): volver a probar.
+        this.checkOdoo();
         // Si lo que se está mostrando vino de un snapshot (no de un análisis
         // corrido en esta sesión), cargar el último snapshot del marketplace
         // recién seleccionado.
@@ -2362,17 +2440,23 @@ class FbaAnalyzer {
         if (title) title.textContent = usa ? 'Amazon USA Restock' : 'Amazon CA Restock';
         if (thWH) thWH.textContent = usa ? 'Warehouse (Flowery Branch)' : 'Warehouse (Cambridge)';
 
-        // Cada marketplace muestra 2 tarjetas de upload:
-        //   USA → Amazon + Inventory ATL (slot cin7); se oculta Stylish.
-        //   CA  → Amazon + Stylish;                   se oculta CIN7.
+        // Tarjetas de upload según marketplace y fuente del inventario:
+        //   Sin Odoo: USA → Amazon + Inventory ATL (slot cin7); CA → Amazon + Stylish.
+        //   Con Odoo: USA → solo Amazon; CA → Amazon + Stylish opcional (solo ETA).
+        const fromOdoo = this.inventoryFromOdoo;
         const stylishCol = document.getElementById('stylish-col');
         if (stylishCol) stylishCol.classList.toggle('d-none', usa);
+        const stylishHint = document.getElementById('stylish-hint');
+        if (stylishHint) stylishHint.textContent = fromOdoo ? 'Optional · ETA only' : 'XLSX';
         const cin7Col = document.getElementById('cin7-col');
-        if (cin7Col) cin7Col.classList.toggle('d-none', !usa);
+        if (cin7Col) cin7Col.classList.toggle('d-none', !usa || fromOdoo);
         const cin7Title = document.getElementById('cin7-report-title');
         if (cin7Title) cin7Title.textContent = usa ? 'Inventory ATL' : 'CIN7 Inventory';
         const uploadHint = document.getElementById('upload-files-hint');
-        if (uploadHint) uploadHint.textContent = 'Drop your two source files to begin analysis';
+        if (uploadHint) uploadHint.textContent = fromOdoo
+            ? 'Drop the Amazon report to begin analysis'
+            : 'Drop your two source files to begin analysis';
+        this.renderInventorySource();
 
         // Columnas de inventario de la tabla, según marketplace:
         //   USA → columna "Warehouse" (Flowery Branch); se oculta "Stylish inv.".
@@ -2388,6 +2472,29 @@ class FbaAnalyzer {
 
         // El requisito de archivos cambió según marketplace: re-evaluar el botón.
         this.checkProcessBtn();
+    }
+
+    // Línea bajo las tarjetas: de dónde sale el inventario y el botón para cambiarlo.
+    renderInventorySource() {
+        const box = document.getElementById('inventory-source');
+        const text = document.getElementById('inventory-source-text');
+        const toggle = document.getElementById('inventory-source-toggle');
+        if (!box || !text || !toggle) return;
+        const { status, warehouse, error } = this.odoo;
+        let state, label, action;
+        if (status === 'checking') {
+            [state, label, action] = ['checking', 'Checking Odoo inventory…', ''];
+        } else if (status === 'off') {
+            [state, label, action] = ['off', `Odoo inventory not available (${error}) · upload the inventory file`, 'Retry'];
+        } else if (this.preferFile) {
+            [state, label, action] = ['file', 'Inventory from the uploaded file', 'Use Odoo instead'];
+        } else {
+            [state, label, action] = ['ok', `Inventory from Odoo · ${warehouse} · Available for Use`, 'Use a file instead'];
+        }
+        box.dataset.state = state;
+        text.textContent = label;
+        toggle.textContent = action;
+        toggle.style.display = action ? '' : 'none';
     }
 
     showStatus(type, msg) {

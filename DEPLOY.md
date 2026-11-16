@@ -90,6 +90,17 @@ En la pantalla de configuración del proyecto:
 
 Confirmá que ambas estén marcadas para **Production**, **Preview** y **Development**.
 
+Para el inventario en vivo desde Odoo (opcional; sin estas la app pide el archivo de inventario como antes), agregá también:
+
+| Key | Value |
+|-----|-------|
+| `ODOO_URL` | `https://TU_EMPRESA.odoo.com` |
+| `ODOO_DB` | Nombre de la base de datos de Odoo |
+| `ODOO_USER` | Login del usuario de Odoo |
+| `ODOO_API_KEY` | API key de ese usuario (Odoo → Preferencias → Seguridad de la cuenta). Marcala como **Sensitive** |
+
+Las usa solo la función `api/odoo-inventory.js`; nunca llegan al browser ni al repo.
+
 **Ahora sí** → click **Deploy**.
 
 Vercel va a:

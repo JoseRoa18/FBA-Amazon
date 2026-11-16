@@ -3,6 +3,9 @@
   "outputDirectory": ".",
   "cleanUrls": true,
   "trailingSlash": false,
+  "functions": {
+    "api/odoo-inventory.js": { "includeFiles": "data/info.csv", "maxDuration": 30 }
+  },
   "headers": [
     {
       "source": "/data/(.*)",
